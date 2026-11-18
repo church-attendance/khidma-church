@@ -1,8 +1,12 @@
 /* خِدمة service worker: network-first (updates always win), cached copy only when offline. */
-const CACHE = 'khidma-shell-v13';
+const CACHE = 'khidma-shell-v14';
+const META = 'khidma-meta';      // tiny note the app leaves here: which church + member this phone belongs to
+const SUPABASE_URL = 'https://owpkjnbnyfldnmubfzsy.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_FeyMhWVyMkFYhOzXllF9ig_08zVqWC8';
+const VAPID_PUBLIC_KEY = 'BCgogBtQZl5k7toCZ6lBxo3vxiVLKdXW5bIClCrpsX7Q5xfglbx9Y2HDjlQUKTxIeg1wGVamNiWGzSO4Dl1q_lo';
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== META).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
   const req = e.request;
@@ -28,10 +32,34 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let d = {};
   try{ d = e.data ? e.data.json() : {}; }catch(err){ d = { body: e.data ? e.data.text() : '' }; }
+  // every message gets its own tag + renotify, so a new one always makes a sound instead of silently replacing the last
+  const tag = d.tag || ('khidma-' + Date.now());
   e.waitUntil(self.registration.showNotification(d.title || 'خِدمة', {
     body: d.body || '', icon: 'icon-192.png', badge: 'favicon.png', dir: 'rtl', lang: 'ar',
-    tag: d.tag || 'khidma', data: { url: d.url || './#today' }
+    tag, renotify: true, vibrate: [150, 80, 150], timestamp: Date.now(),
+    data: { url: d.url || './#today' }
   }));
+});
+
+/* If the browser changes this phone's push address, register the new one by ourselves
+   (without this the server keeps sending to the old address and notifications silently stop). */
+function b64ToU8(b){ const s = (b + '='.repeat((4 - b.length % 4) % 4)).replace(/-/g,'+').replace(/_/g,'/'); const raw = atob(s); return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0))); }
+self.addEventListener('pushsubscriptionchange', e => {
+  e.waitUntil((async () => {
+    try{
+      const old = e.oldSubscription;
+      const key = (old && old.options && old.options.applicationServerKey) || b64ToU8(VAPID_PUBLIC_KEY);
+      const sub = e.newSubscription || await self.registration.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:key });
+      const hit = await (await caches.open(META)).match('push-identity');
+      const who = hit ? await hit.json() : null;
+      if(!who || !who.church || !who.member) return;   // the app will save it the next time it is opened
+      await fetch(SUPABASE_URL + '/rest/v1/rpc/save_push_subscription', {
+        method:'POST',
+        headers:{ 'apikey':SUPABASE_KEY, 'Authorization':'Bearer ' + SUPABASE_KEY, 'Content-Type':'application/json' },
+        body: JSON.stringify({ p_church: who.church, p_member: who.member, p_sub: sub.toJSON() })
+      });
+    }catch(err){ /* nothing else to do here */ }
+  })());
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();

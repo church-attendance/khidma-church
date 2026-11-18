@@ -3,7 +3,7 @@
    Client-only demo: persistence via localStorage on this device only.
    ======================================================================= */
 
-const APP_VERSION = 'v13 · daily psalms + notifications';
+const APP_VERSION = 'v14 · bubbly + announcement notifications';
 const STORAGE_PREFIX = 'khidma_church_app_v3_';
 const CHURCH_CODE_KEY = 'khidma_church_code';
 
@@ -520,7 +520,7 @@ function themeSwitcherHTML(){
 function bindThemeButtons(){ document.querySelectorAll('[data-theme-set]').forEach(b=>{ b.onclick = ()=> setTheme(b.dataset.themeSet); }); }
 applyTheme(currentTheme());
 
-function render(){ renderCore(); bindThemeButtons(); if(typeof ensureReminders==='function') ensureReminders(); }
+function render(){ renderCore(); bindThemeButtons(); if(typeof ensureReminders==='function') ensureReminders(); if(typeof syncPush==='function') syncPush(); }
 function renderCore(){
   checkEmergencyExpiry();
   const root = document.getElementById('root');
@@ -709,7 +709,7 @@ function bindDirectorEvents(){
     sendNewsBtn.disabled = true; sendNewsBtn.textContent = 'جاري الإرسال...';
     directorGlobalNews.push({ id: uid('gnews'), title, content: body, createdAt: nowISO() });
     const res = await saveDirectorData();
-    showToast(res.ok ? 'تم إرسال الرسالة لكل الكنائس.' : 'لم تُحفظ الرسالة. '+lastSaveError);
+    showToast(res.ok ? 'تم إرسال الرسالة لكل الكنائس 🔔 مع إشعار.' : 'لم تُحفظ الرسالة. '+lastSaveError);
     render();
   };
   document.querySelectorAll('[data-del-globalnews]').forEach(b=>{
@@ -1123,10 +1123,35 @@ async function enablePush(u){
     const ok = await rpc('save_push_subscription', { p_church: churchCode, p_member: u.id, p_sub: sub.toJSON() });
     if(!ok) throw new Error('رُفض الحفظ');
     try{ localStorage.setItem('khidma_push_on','1'); }catch(e){}
+    rememberPushIdentity(u); pushSyncedFor = churchCode + '|' + u.id;
     showToast('تم تفعيل الإشعارات الفورية ✓');
   }catch(e){ console.warn(e); showToast('تعذّر التفعيل: ' + (e.message||'') ); }
   render();
 }
+const pushIsOn = () => ('Notification' in window) && Notification.permission==='granted' && localStorage.getItem('khidma_push_on')==='1';
+/* the service worker reads this to re-register this phone by itself if the browser changes its push address */
+async function rememberPushIdentity(u){
+  try{ const c = await caches.open('khidma-meta'); await c.put('push-identity', new Response(JSON.stringify({ church:churchCode, member:u.id }))); }catch(e){}
+}
+/* A phone's push address can change or be dropped. Every time the app opens (and every time it comes back to the
+   screen) we check it and re-save it, so notifications keep arriving instead of working only once. */
+let pushSyncedFor = null;
+async function syncPush(){
+  try{
+    const u = currentUser();
+    if(!u || !churchCode || directorSession || !pushIsOn() || !pushSupported()) return;
+    const key = churchCode + '|' + u.id;
+    if(pushSyncedFor === key) return;
+    pushSyncedFor = key;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY) });
+    const ok = await rpc('save_push_subscription', { p_church: churchCode, p_member: u.id, p_sub: sub.toJSON() });
+    if(!ok) throw new Error('save refused');
+    rememberPushIdentity(u);
+  }catch(e){ pushSyncedFor = null; console.warn('push sync failed (will retry):', e); }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ pushSyncedFor = null; syncPush(); } });
 async function disablePush(){
   try{
     const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
@@ -1230,6 +1255,7 @@ function bindTodayEvents(u){
       render();
     };
   });
+  document.querySelectorAll('[data-enable-push]').forEach(b=>{ b.onclick = ()=> enablePush(u); });
   document.querySelectorAll('[data-push-toggle]').forEach(b=>{ b.onclick = ()=>{ if(b.dataset.pushToggle==='on') enablePush(u); else disablePush(); }; });
 }
 
@@ -1288,6 +1314,7 @@ function renderNews(u){
   return `
   <div class="screen">
     <h2 class="section-title">الأخبار والإعلانات</h2>
+    ${pushIsOn() ? '' : `<div class="card p-3 mb-3 push-nudge"><div class="mb-2">🔔 فعّل الإشعارات لتصلك الإعلانات الجديدة فورًا، حتى والتطبيق مغلق.</div><button class="btn btn-gold btn-sm" data-enable-push>تفعيل الإشعارات</button></div>`}
     ${canPost ? `<div class="card p-3 mb-3">
       <div class="mb-3"><input class="form-control" type="text" id="news_title" placeholder="عنوان الخبر"></div>
       <div class="mb-3"><textarea class="form-control" id="news_body" placeholder="تفاصيل الإعلان..."></textarea></div>
@@ -2291,7 +2318,7 @@ function bindAppEvents(u){
     if(!title || !body){ showToast('يرجى إدخال العنوان والتفاصيل.'); return; }
     state.news.push({ id:uid('news'), title, content:body, stageId, authorName:u.name, authorId:u.id, createdAt: nowISO() });
     const stage = stageId ? stageOf(stageId) : null;
-    log(u.name, stage ? `نشر إعلانًا لمرحلة "${stage.name}": "${title}"` : `نشر إعلانًا: "${title}"`); persist(); render();
+    log(u.name, stage ? `نشر إعلانًا لمرحلة "${stage.name}": "${title}"` : `نشر إعلانًا: "${title}"`); persist(); showToast('تم نشر الإعلان 🔔 وسيصل للجميع كإشعار');
   };
   document.querySelectorAll('[data-del-news]').forEach(b=>{ b.onclick = ()=>{ state.news = state.news.filter(n=>n.id!==b.dataset.delNews); log(u.name,'حذف إعلانًا.'); persist(); render(); }; });
 
@@ -2621,6 +2648,15 @@ function bindAppEvents(u){
 }
 
 render();
+/* tapping a notification opens ./#news or ./#today: switch to that tab, then clear the hash */
+function applyHashTab(){
+  const h = (location.hash||'').replace('#','');
+  const u = currentUser();
+  if(!h || !u) return;
+  if(tabsFor(u.role).some(t=>t.id===h)){ ui.activeTab = h; try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){} render(); }
+}
+window.addEventListener('hashchange', applyHashTab);
+applyHashTab();
 // Pull the latest shared state from the database once at startup, then keep polling
 // periodically so changes made by other people/devices show up here too.
 initialSync();
