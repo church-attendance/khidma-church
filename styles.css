@@ -332,7 +332,7 @@ textarea.form-control{resize:vertical;min-height:80px;}
   position:fixed;bottom:calc(98px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
   background:var(--ink);color:#fff;padding:11px 22px;border-radius:999px;border:2.5px solid rgba(255,255,255,.45);
   font-family:var(--font-display);font-size:15px;font-weight:700;line-height:1.4;
-  box-shadow:0 4px 0 var(--ink-deep), 0 14px 26px rgba(0,0,0,.22);z-index:50;max-width:90%;text-align:center;
+  box-shadow:0 4px 0 var(--ink-deep), 0 14px 26px rgba(0,0,0,.22);z-index:150;max-width:90%;text-align:center;cursor:pointer;
   animation:pop .28s cubic-bezier(.3,1.5,.5,1);
 }
 @keyframes pop{from{transform:translateX(-50%) scale(.7);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
@@ -350,13 +350,24 @@ ul.plain{list-style:none;margin:0;padding:0;}
 .points-pill button:active{transform:translateY(3px);box-shadow:none;}
 .points-pill .val{font-family:var(--font-display);font-weight:800;font-size:16px;min-width:36px;text-align:center;}
 
-/* ---------- scanner modal ---------- */
+/* ---------- scanner: stays open, shows a coloured frame + clear messages ---------- */
 .scan-overlay{position:fixed;inset:0;background:#000;z-index:100;display:flex;flex-direction:column;max-width:520px;margin:0 auto;}
-.scan-overlay video{flex:1;width:100%;object-fit:cover;}
-.scan-frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:230px;height:230px;border:5px solid var(--gold);border-radius:34px;box-shadow:0 0 0 2000px rgba(0,0,0,.5);}
-.scan-top{position:absolute;top:0;left:0;right:0;padding:16px;display:flex;justify-content:space-between;align-items:center;color:#fff;z-index:2;}
-.scan-top button{background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:17px;}
-.scan-status{position:absolute;bottom:24px;left:16px;right:16px;text-align:center;color:#fff;font-size:14px;background:rgba(0,0,0,.55);padding:11px;border-radius:20px;z-index:2;}
+.scan-overlay video{flex:1;width:100%;min-height:0;object-fit:cover;}
+.scan-frame{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(72vw,300px);aspect-ratio:1;border:5px solid #fff;border-radius:36px;
+  box-shadow:0 0 0 2000px rgba(8,16,48,.55);transition:border-color .15s ease;overflow:hidden;
+}
+.scan-frame::after{content:"";position:absolute;left:8%;right:8%;height:4px;border-radius:4px;background:var(--gold);box-shadow:0 0 14px var(--gold);animation:scanline 2s ease-in-out infinite alternate;}
+@keyframes scanline{from{top:10%}to{top:88%}}
+.scan-frame.ok{border-color:var(--mint-light);}
+.scan-frame.bad{border-color:var(--bad-solid);}
+.scan-frame.ok::after,.scan-frame.bad::after{display:none;}
+.scan-top{position:absolute;top:0;left:0;right:0;padding:calc(14px + env(safe-area-inset-top)) 16px 14px;display:flex;justify-content:space-between;align-items:center;color:#fff;z-index:2;}
+.scan-top button{background:var(--gold);border:none;color:var(--on-gold);width:46px;height:46px;border-radius:50%;font-size:20px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 var(--gold-deep);}
+.scan-top button:active{transform:translateY(4px);box-shadow:none;}
+.scan-count{background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.4);padding:6px 16px;border-radius:999px;font-family:var(--font-display);font-weight:800;font-size:18px;}
+.scan-status{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom));left:16px;right:16px;text-align:center;color:#fff;font-family:var(--font-display);font-weight:700;font-size:17px;line-height:1.5;background:rgba(8,16,48,.72);border:2.5px solid rgba(255,255,255,.3);padding:12px 16px;border-radius:24px;z-index:2;}
 
 .confirm-overlay{position:fixed;inset:0;background:rgba(15,25,70,.55);z-index:120;display:flex;align-items:center;justify-content:center;padding:24px;max-width:520px;margin:0 auto;}
 .confirm-box{background:var(--paper);border:3px solid var(--line);border-radius:30px;padding:22px;width:100%;max-width:350px;box-shadow:0 6px 0 var(--line-strong), 0 20px 36px rgba(0,0,0,.25);}
@@ -366,7 +377,7 @@ ul.plain{list-style:none;margin:0;padding:0;}
 /* ---------- Today tab: psalms, progress, encouragement ---------- */
 .today-progress{height:16px;border-radius:99px;background:var(--parchment-2);border:2.5px solid var(--line);overflow:hidden;}
 .today-progress > span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--pink),var(--gold),var(--mint));transition:width .3s ease;}
-.psalm-text{margin:14px 0;padding:14px 18px;border-radius:22px;background:var(--parchment);border:2.5px solid var(--line);max-height:60vh;overflow-y:auto;}
+.psalm-text{margin:14px 0;padding:14px 18px;border-radius:22px;background:var(--parchment);border:2.5px solid var(--line);}
 .psalm-text p{margin:0 0 10px;font-size:17px;line-height:2;color:var(--text);}
 .psalm-text .vn{display:inline-block;min-width:24px;margin-inline-end:6px;font-family:var(--font-display);font-size:13px;font-weight:800;color:var(--pink);}
 input[type="time"].form-control{text-align:center;}

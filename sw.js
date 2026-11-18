@@ -1,5 +1,5 @@
 /* خِدمة service worker: network-first (updates always win), cached copy only when offline. */
-const CACHE = 'khidma-shell-v14';
+const CACHE = 'khidma-shell-v16';
 const META = 'khidma-meta';      // tiny note the app leaves here: which church + member this phone belongs to
 const SUPABASE_URL = 'https://owpkjnbnyfldnmubfzsy.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_FeyMhWVyMkFYhOzXllF9ig_08zVqWC8';
@@ -34,11 +34,17 @@ self.addEventListener('push', e => {
   try{ d = e.data ? e.data.json() : {}; }catch(err){ d = { body: e.data ? e.data.text() : '' }; }
   // every message gets its own tag + renotify, so a new one always makes a sound instead of silently replacing the last
   const tag = d.tag || ('khidma-' + Date.now());
-  e.waitUntil(self.registration.showNotification(d.title || 'خِدمة', {
+  e.waitUntil((async () => {
+    // a new reading message replaces the old reading messages in the tray (announcements are never removed)
+    if(tag.startsWith('psalm-') || tag.startsWith('read-')){
+      try{ (await self.registration.getNotifications()).filter(n => (n.tag || '').startsWith('psalm-') || (n.tag || '').startsWith('read-')).forEach(n => n.close()); }catch(err){}
+    }
+    return self.registration.showNotification(d.title || 'خِدمة', {
     body: d.body || '', icon: 'icon-192.png', badge: 'favicon.png', dir: 'rtl', lang: 'ar',
     tag, renotify: true, vibrate: [150, 80, 150], timestamp: Date.now(),
     data: { url: d.url || './#today' }
-  }));
+  });
+  })());
 });
 
 /* If the browser changes this phone's push address, register the new one by ourselves

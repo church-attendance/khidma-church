@@ -3,7 +3,7 @@
    Client-only demo: persistence via localStorage on this device only.
    ======================================================================= */
 
-const APP_VERSION = 'v14 · bubbly + announcement notifications';
+const APP_VERSION = 'v14.2 · whole Bible + bubbly + announcement notifications';
 const STORAGE_PREFIX = 'khidma_church_app_v3_';
 const CHURCH_CODE_KEY = 'khidma_church_code';
 
@@ -298,10 +298,17 @@ function log(actor, action){
   state.auditLog.unshift({ id:uid('log'), time: nowISO(), actor, action });
   state.auditLog = state.auditLog.slice(0,80);
 }
+let toastTimer = null;
+function hideToast(){ clearTimeout(toastTimer); const el = document.getElementById('appToast'); if(el) el.remove(); }
 function showToast(msg){
-  ui.toast = msg;
-  render();
-  setTimeout(()=>{ ui.toast=null; render(); }, 2200);
+  render();   // many callers rely on this to refresh the screen after they changed something
+  let el = document.getElementById('appToast');
+  if(!el){ el = document.createElement('div'); el.id = 'appToast'; el.className = 'app-toast'; el.setAttribute('role','status'); document.body.appendChild(el); }
+  el.textContent = msg;                     // plain text: safe even if a name contains < or >
+  el.onclick = hideToast;                   // tap it to close it at once
+  el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';   // replay the little pop
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 2600); // always closes by itself, even if a redraw fails
 }
 function askConfirm(message, onYes){
   ui.confirm = { message, onYes };
@@ -566,7 +573,7 @@ function renderChurchGate(){
       <button class="btn btn-primary" id="dirSubmitBtn">دخول</button>
       <div class="text-center" style="margin-top:16px;"><button class="btn-ghost" id="toChurchGate" type="button">رجوع لتسجيل الدخول بكود الكنيسة</button></div>
     `}
-    <div class="text-center" style="margin-top:10px;"><button class="btn btn-outline btn-sm install-app-btn" onclick="triggerInstall()">📲 تثبيت التطبيق على الشاشة الرئيسية</button></div>
+    ${isInstalled() ? '' : `<div class="text-center" style="margin-top:10px;"><button class="btn btn-outline btn-sm install-app-btn" onclick="triggerInstall()">📲 تثبيت التطبيق على الشاشة الرئيسية</button></div>`}
     ${themeSwitcherHTML()}
     <div class="text-center muted" style="margin-top:14px;font-size:11px;">الإصدار ${APP_VERSION}</div>
   </div>`;
@@ -944,7 +951,6 @@ function renderApp(u){
   ${emergencyBanner}
   <div class="content" id="contentArea">${renderTab(u, ui.activeTab)}</div>
   <div class="tabbar">${tabs.map(t=>`<button class="tab ${ui.activeTab===t.id?'active':''}" data-tab="${t.id}"><span class="ic">${t.ic}</span>${t.label}</button>`).join('')}</div>
-  ${ui.toast ? `<div class="app-toast">${ui.toast}</div>` : ''}
   ${ui.scanning ? renderScanOverlay() : ''}
   ${ui.confirm ? `<div class="confirm-overlay"><div class="confirm-box"><p>${escapeHtml(ui.confirm.message)}</p><div class="d-flex gap-2 equal-cols"><button class="btn btn-outline btn-sm" id="confirmNo" style="flex:1;">إلغاء</button><button class="btn btn-danger btn-sm" id="confirmYes" style="flex:1;">تأكيد</button></div></div></div>` : ''}
   `;
@@ -960,9 +966,9 @@ function renderTab(u, tab){
   return '';
 }
 
-/* ---------------- TODAY: 3 psalms a day + a word of encouragement + reminders ---------------- */
+/* ---------------- TODAY: 3 Bible chapters a day + a word of encouragement + reminders ---------------- */
 const VAPID_PUBLIC_KEY = 'BCgogBtQZl5k7toCZ6lBxo3vxiVLKdXW5bIClCrpsX7Q5xfglbx9Y2HDjlQUKTxIeg1wGVamNiWGzSO4Dl1q_lo';   // public half of the push key (safe to be in the file)
-const PSALM_SLOTS = [ { name:'مزمور الصباح', ic:'🌅' }, { name:'مزمور الظهر', ic:'☀️' }, { name:'مزمور المساء', ic:'🌙' } ];
+const PSALM_SLOTS = [ { name:'قراءة الصباح', ic:'🌅' }, { name:'قراءة الظهر', ic:'☀️' }, { name:'قراءة المساء', ic:'🌙' } ];   // (name kept for old code; they are Bible readings now)
 const WORDS = [
   { t:'أستطيع كل شيء في المسيح الذي يقويني.', r:'فيلبي ٤ : ١٣' },
   { t:'لا تخف لأني معك. لا تتلفت لأني إلهك. قد أيدتك وأعنتك وعضدتك بيمين بري.', r:'إشعياء ٤١ : ١٠' },
@@ -1010,46 +1016,104 @@ const WORDS = [
   { t:'كل خدمة صغيرة تقدمها لله تُحسب عظيمة عنده.', r:'' },
   { t:'اختر الشكر اليوم، وسيتغير شكل يومك.', r:'' },
 ];
-/* The day is always counted by Cairo's calendar, so the whole church (and the push messages) read the same psalms. */
+/* The day is always counted by Cairo's calendar, so the whole church (and the push messages) read the same chapters. */
 function cairoParts(d = new Date()){
   const f = new Intl.DateTimeFormat('en-GB', { timeZone:'Africa/Cairo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
   const p = {}; f.formatToParts(d).forEach(x=>{ p[x.type] = x.value; });
   return { y:+p.year, m:+p.month, d:+p.day, h:(+p.hour)%24, min:+p.minute };
 }
 function dayNumber(c){ return Math.floor(Date.UTC(c.y, c.m-1, c.d) / 86400000); }
-function psalmForSlot(dn, slot){ return (dn % 50) * 3 + 1 + slot; }          // 3 psalms a day → all 150 in 50 days
 function wordOfDay(dn){ return WORDS[dn % WORDS.length]; }
 function dateKeyOf(dn){ const d = new Date(dn*86400000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`; }
 
-/* Psalm numbers follow the Coptic Orthodox (Septuagint) order. The Arabic Van Dyck text is numbered the Hebrew way,
-   so each Coptic number is mapped to the matching Van Dyck chapter(s). */
-function psalmParts(n){
-  if(n<=8) return [{ c:n }];
-  if(n===9) return [{ c:9 }, { c:10 }];
-  if(n<=112) return [{ c:n+1 }];
-  if(n===113) return [{ c:114 }, { c:115 }];
-  if(n===114) return [{ c:116, from:1, to:9 }];
-  if(n===115) return [{ c:116, from:10, to:19 }];
-  if(n<=145) return [{ c:n+1 }];
-  if(n===146) return [{ c:147, from:1, to:11 }];
-  if(n===147) return [{ c:147, from:12, to:20 }];
-  return [{ c:n }];
-}
-async function loadPsalmText(n){
-  const key = 'khidma_psalm_v1_' + n;
-  try{ const cached = localStorage.getItem(key); if(cached) return JSON.parse(cached); }catch(e){}
-  const out = [];
-  for(const part of psalmParts(n)){
-    const res = await fetch(`https://api.getbible.net/v2/arabicsv/19/${part.c}.json`);
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const data = await res.json();
-    let vs = data.verses; if(vs && !Array.isArray(vs)) vs = Object.values(vs);
-    if(!Array.isArray(vs) || !vs.length) throw new Error('unexpected format');
-    vs.forEach(v=>{ const vn = Number(v.verse); if((part.from && vn<part.from) || (part.to && vn>part.to)) return; const t = String(v.text||'').trim(); if(t) out.push(t); });
+/* ---------------- THE WHOLE BIBLE: 3 chapters a day, Genesis → Revelation ---------------- */
+/* [name, number of chapters] — the position in this list (1…66) is the book number used by the text source (Arabic Van Dyck). */
+const BIBLE_BOOKS = [
+  ['التكوين',50],['الخروج',40],['اللاويين',27],['العدد',36],['التثنية',34],['يشوع',24],['القضاة',21],['راعوث',4],
+  ['صموئيل الأول',31],['صموئيل الثاني',24],['الملوك الأول',22],['الملوك الثاني',25],['أخبار الأيام الأول',29],['أخبار الأيام الثاني',36],
+  ['عزرا',10],['نحميا',13],['أستير',10],['أيوب',42],['المزامير',150],['الأمثال',31],['الجامعة',12],['نشيد الأنشاد',8],
+  ['إشعياء',66],['إرميا',52],['مراثي إرميا',5],['حزقيال',48],['دانيال',12],['هوشع',14],['يوئيل',3],['عاموس',9],['عوبديا',1],
+  ['يونان',4],['ميخا',7],['ناحوم',3],['حبقوق',3],['صفنيا',3],['حجي',2],['زكريا',14],['ملاخي',4],
+  ['متى',28],['مرقس',16],['لوقا',24],['يوحنا',21],['أعمال الرسل',28],['رومية',16],['كورنثوس الأولى',16],['كورنثوس الثانية',13],
+  ['غلاطية',6],['أفسس',6],['فيلبي',4],['كولوسي',4],['تسالونيكي الأولى',5],['تسالونيكي الثانية',3],['تيموثاوس الأولى',6],
+  ['تيموثاوس الثانية',4],['تيطس',3],['فليمون',1],['العبرانيين',13],['يعقوب',5],['بطرس الأولى',5],['بطرس الثانية',3],
+  ['يوحنا الأولى',5],['يوحنا الثانية',1],['يوحنا الثالثة',1],['يهوذا',1],['رؤيا يوحنا',22],
+];
+const BIBLE_TOTAL = BIBLE_BOOKS.reduce((n, b) => n + b[1], 0);          // 1189 chapters
+const PLAN_DAYS = Math.ceil(BIBLE_TOTAL / 3);                           // 397 days for one full round
+/* Day 1 of the plan (Genesis 1-3) is this date, by Cairo's calendar. Before it, everyone sees day 1. Change the date here (and in the push function) to restart the plan. */
+const PLAN_START_DAY = Math.floor(Date.UTC(2026, 10, 22) / 86400000);   // Sunday 22 November 2026  (month 10 = November)
+function planDay(dn){ return Math.max(0, dn - PLAN_START_DAY); }
+function readingForSlot(dn, slot){
+  let idx = (planDay(dn) * 3 + slot) % BIBLE_TOTAL;
+  for(let b = 0; b < BIBLE_BOOKS.length; b++){
+    if(idx < BIBLE_BOOKS[b][1]) return { book: b + 1, chap: idx + 1, name: BIBLE_BOOKS[b][0], label: BIBLE_BOOKS[b][0] + ' ' + (idx + 1) };
+    idx -= BIBLE_BOOKS[b][1];
   }
+}
+
+/* The text comes from the free Arabic Van Dyck Bible service (the same one the app already used) and is kept on the phone,
+   so a chapter that was opened once also opens offline. Psalms are numbered the Van Dyck (Hebrew) way. */
+async function loadChapterText(book, chap){
+  const key = 'khidma_bible_v1_' + book + '_' + chap;
+  try{ const cached = localStorage.getItem(key); if(cached) return JSON.parse(cached); }catch(e){}
+  const res = await fetch(`https://api.getbible.net/v2/arabicsv/${book}/${chap}.json`);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const data = await res.json();
+  let vs = data.verses; if(vs && !Array.isArray(vs)) vs = Object.values(vs);
+  if(!Array.isArray(vs) || !vs.length) throw new Error('unexpected format');
+  const out = vs.map(v=>String(v.text||'').trim()).filter(Boolean);
   if(!out.length) throw new Error('empty');
-  try{ localStorage.setItem(key, JSON.stringify(out)); }catch(e){}
+  rememberChapter(key, out);
   return out;
+}
+function rememberChapter(key, out){   // only the 60 most recent chapters stay on the phone, so storage never fills up
+  try{
+    const idx = JSON.parse(localStorage.getItem('khidma_bible_idx') || '[]').filter(k=>k!==key); idx.push(key);
+    while(idx.length > 60){ localStorage.removeItem(idx.shift()); }
+    localStorage.setItem(key, JSON.stringify(out)); localStorage.setItem('khidma_bible_idx', JSON.stringify(idx));
+  }catch(e){}
+}
+(function dropOldPsalmCache(){ try{ Object.keys(localStorage).filter(k=>k.startsWith('khidma_psalm_v1_')).forEach(k=>localStorage.removeItem(k)); }catch(e){} })();
+
+const chapKey = (b, c) => b + ':' + c;
+function ensureChapter(book, chap){
+  const key = chapKey(book, chap);
+  ui.bibleData = ui.bibleData || {}; ui.bibleErr = ui.bibleErr || {};
+  if(ui.bibleData[key]) return;
+  delete ui.bibleErr[key];
+  loadChapterText(book, chap).then(v=>{ ui.bibleData[key] = v; render(); }).catch(e=>{ console.warn(e); ui.bibleErr[key] = true; render(); });
+}
+function stepChapter(book, chap, delta){      // next / previous chapter, crossing from one book to the next
+  chap += delta;
+  if(chap < 1){ if(book === 1) return { book, chap:1 }; book--; chap = BIBLE_BOOKS[book-1][1]; }
+  else if(chap > BIBLE_BOOKS[book-1][1]){ if(book === BIBLE_BOOKS.length) return { book, chap: BIBLE_BOOKS[book-1][1] }; book++; chap = 1; }
+  return { book, chap };
+}
+function chapterBodyHTML(book, chap){
+  const key = chapKey(book, chap);
+  const verses = ui.bibleData && ui.bibleData[key];
+  if(verses) return `<div class="psalm-text">${verses.map((t,k)=>`<p><span class="vn">${k+1}</span>${escapeHtml(t)}</p>`).join('')}</div>`;
+  if(ui.bibleErr && ui.bibleErr[key]) return `<div class="muted" style="margin:10px 0;">تعذّر تحميل النص الآن (تحتاج اتصالًا بالإنترنت أول مرة). <a href="https://www.google.com/search?q=${encodeURIComponent(BIBLE_BOOKS[book-1][0]+' '+chap+' الكتاب المقدس')}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700;">افتح الإصحاح في المتصفح</a></div>`;
+  return `<div class="muted" style="margin:10px 0;">جاري تحميل الإصحاح…</div>`;
+}
+function libraryCardHTML(){
+  const lib = ui.lib || (ui.lib = { book:1, chap:1, open:false });
+  const opt = (i) => `<option value="${i+1}" ${lib.book===i+1?'selected':''}>${BIBLE_BOOKS[i][0]}</option>`;
+  const books = `<optgroup label="العهد القديم">${BIBLE_BOOKS.slice(0,39).map((_,i)=>opt(i)).join('')}</optgroup><optgroup label="العهد الجديد">${BIBLE_BOOKS.slice(39).map((_,i)=>opt(i+39)).join('')}</optgroup>`;
+  const chaps = Array.from({ length: BIBLE_BOOKS[lib.book-1][1] }, (_,i)=>`<option value="${i+1}" ${lib.chap===i+1?'selected':''}>${i+1}</option>`).join('');
+  return `
+    <div class="card p-3 mb-3">
+      <b>📚 الكتاب المقدس كله</b>
+      <div class="muted mb-2">اقرأ أي سفر وأي إصحاح، في أي وقت.</div>
+      <div class="d-flex gap-2 mb-2">
+        <select class="form-select" id="libBook" style="flex:1;" aria-label="السفر">${books}</select>
+        <select class="form-select" id="libChap" style="width:96px;" aria-label="الإصحاح">${chaps}</select>
+      </div>
+      ${lib.open ? `<div class="muted" style="font-weight:700;">${escapeHtml(BIBLE_BOOKS[lib.book-1][0])} ${lib.chap}</div>${chapterBodyHTML(lib.book, lib.chap)}
+        <div class="d-flex gap-2 equal-cols"><button class="btn btn-outline btn-sm" data-lib-step="-1">السابق</button><button class="btn btn-outline btn-sm" data-lib-step="1">التالي</button><button class="btn btn-gold btn-sm" data-lib-open>إخفاء</button></div>`
+        : `<button class="btn btn-teal btn-sm" data-lib-open>📖 اقرأ</button>`}
+    </div>`;
 }
 
 /* reading progress (kept on this device) */
@@ -1084,7 +1148,7 @@ function fireReminder(slot){
   if((readLog(u)[dk] || [])[slot]) return;                              // already read — stay quiet
   const sk = `khidma_notified_${dk}_${slot}`; if(localStorage.getItem(sk)) return;
   try{ localStorage.setItem(sk, '1'); }catch(e){}
-  showLocalNotification(`📖 ${PSALM_SLOTS[slot].name}`, `مزمور ${psalmForSlot(dn, slot)} — ${wordOfDay(dn).t}`, `psalm-${slot}`);
+  showLocalNotification(`📖 ${PSALM_SLOTS[slot].name}`, `${readingForSlot(dn, slot).label} — ${wordOfDay(dn).t}`, `read-${slot}`);
 }
 let reminderTimers = [], reminderArmedFor = undefined;
 function scheduleReminders(){
@@ -1128,6 +1192,13 @@ async function enablePush(u){
   }catch(e){ console.warn(e); showToast('تعذّر التفعيل: ' + (e.message||'') ); }
   render();
 }
+/* the reminder card shows only if notifications can work here, are not on yet, and were not dismissed in the last 3 days */
+function pushNudgeVisible(){
+  try{
+    if(!pushSupported() || !('Notification' in window) || Notification.permission === 'denied' || pushIsOn()) return false;
+    return Number(localStorage.getItem('khidma_nudge_until') || 0) < Date.now();
+  }catch(e){ return false; }
+}
 const pushIsOn = () => ('Notification' in window) && Notification.permission==='granted' && localStorage.getItem('khidma_push_on')==='1';
 /* the service worker reads this to re-register this phone by itself if the browser changes its push address */
 async function rememberPushIdentity(u){
@@ -1169,20 +1240,17 @@ function renderToday(u){
   const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
   const pushOn = localStorage.getItem('khidma_push_on')==='1' && perm==='granted';
   const remindOn = cfg.on && perm==='granted';
-  const psalmCard = (s, i)=>{
-    const n = psalmForSlot(dn, i), open = ui.openPsalm === i, read = !!done[i];
+  const readingCard = (s, i)=>{
+    const r = readingForSlot(dn, i), open = ui.openPsalm === i, read = !!done[i];
     let body = '';
     if(open){
-      const verses = ui.psalmData && ui.psalmData[n];
-      if(verses) body = `<div class="psalm-text">${verses.map((t,k)=>`<p><span class="vn">${k+1}</span>${escapeHtml(t)}</p>`).join('')}</div>`;
-      else if(ui.psalmErr && ui.psalmErr[n]) body = `<div class="muted" style="margin:10px 0;">تعذّر تحميل النص الآن (تحتاج اتصالًا بالإنترنت أول مرة). <a href="https://www.google.com/search?q=${encodeURIComponent('مزمور '+n+' الكتاب المقدس')}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700;">افتح المزمور في المتصفح</a></div>`;
-      else body = `<div class="muted" style="margin:10px 0;">جاري تحميل المزمور…</div>`;
+      body = chapterBodyHTML(r.book, r.chap);
       body += `<button class="btn ${read?'btn-outline':'btn-teal'} btn-sm" data-read-psalm="${i}">${read?'↩︎ إلغاء علامة القراءة':'✓ قرأته'}</button>`;
     }
     return `
     <div class="card p-3 mb-3">
       <div class="d-flex justify-content-between align-items-center gap-2">
-        <div><b style="font-size:15px;">${s.ic} ${s.name}</b><div class="muted">مزمور ${n}</div></div>
+        <div><b style="font-size:15px;">${s.ic} ${s.name}</b><div class="muted">${escapeHtml(r.label)}</div></div>
         <div class="d-flex align-items-center gap-2">
           ${read ? `<span class="badge rounded-pill badge-ok">✓ تمت</span>` : ''}
           <button class="btn btn-gold btn-sm" data-open-psalm="${i}">${open?'إخفاء':'📖 اقرأ'}</button>
@@ -1191,6 +1259,9 @@ function renderToday(u){
       ${body}
     </div>`;
   };
+  const planNote = dn < PLAN_START_DAY
+    ? `تبدأ الخطة يوم ${new Date(PLAN_START_DAY*86400000).toLocaleDateString('ar-EG', { timeZone:'UTC', weekday:'long', day:'numeric', month:'long' })}`
+    : `اليوم ${(planDay(dn) % PLAN_DAYS) + 1} من ${PLAN_DAYS} في قراءة الكتاب المقدس كله`;
   const timeRow = PSALM_SLOTS.map((s,i)=>`<div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label m-0">${s.ic} ${s.name}</label><input class="form-control" type="time" style="width:150px;" value="${cfg.times[i]}" data-remind-time="${i}"></div>`).join('');
   return `
   <div class="screen">
@@ -1201,20 +1272,21 @@ function renderToday(u){
       ${w.r ? `<div class="muted">${escapeHtml(w.r)}</div>` : ''}
     </div>
     <div class="card p-3 mb-3">
-      <div class="d-flex justify-content-between align-items-center"><b>مزامير اليوم</b><span class="badge rounded-pill badge-gold">${count} / 3</span></div>
+      <div class="d-flex justify-content-between align-items-center"><b>قراءات اليوم</b><span class="badge rounded-pill badge-gold">${count} / 3</span></div>
       <div class="today-progress mt-2"><span style="width:${Math.round(count/3*100)}%"></span></div>
-      <div class="muted mt-2">${count===3 ? '🎉 أحسنت! أكملت مزامير اليوم' : (streak ? `🔥 ${streak} ${streak===1?'يوم':'أيام'} متتالية — لا تقطع السلسلة` : 'ابدأ سلسلتك اليوم 🔥')} · اليوم ${(dn%50)+1} من ٥٠ في دورة المزامير</div>
+      <div class="muted mt-2">${count===3 ? '🎉 أحسنت! أكملت قراءات اليوم' : (streak ? `🔥 ${streak} ${streak===1?'يوم':'أيام'} متتالية — لا تقطع السلسلة` : 'ابدأ سلسلتك اليوم 🔥')} · ${planNote}</div>
     </div>
-    ${PSALM_SLOTS.map(psalmCard).join('')}
+    ${PSALM_SLOTS.map(readingCard).join('')}
+    ${libraryCardHTML()}
     <div class="card p-3 mb-3">
-      <b>🔔 تذكير بالمزامير</b>
+      <b>🔔 تذكير بالقراءات</b>
       <div class="muted mb-2">اختر مواعيدك. التذكير يعمل والتطبيق مفتوح أو في الخلفية.</div>
       <div class="mb-3">${timeRow}</div>
       ${perm==='denied' ? `<div class="muted" style="color:var(--bad);">الإشعارات محظورة من إعدادات المتصفح لهذا الموقع.</div>`
         : `<button class="btn ${remindOn?'btn-outline':'btn-teal'} btn-sm" data-remind-toggle>${remindOn?'إيقاف التذكير':'تفعيل التذكير'}</button>`}
       <hr style="border-color:var(--line);margin:16px 0;">
       <b>📲 إشعارات حتى والتطبيق مغلق</b>
-      <div class="muted mb-2">${pushOn ? '✅ مفعّلة: ستصلك رسالة بمزمور كل وقت مع كلمة تشجيع.' : 'تصلك رسالة بمزمور الصباح والظهر والمساء مع كلمة تشجيع. على الآيفون: ثبّت التطبيق على الشاشة الرئيسية أولًا.'}</div>
+      <div class="muted mb-2">${pushOn ? '✅ مفعّلة: ستصلك رسالة بقراءة كل وقت مع كلمة تشجيع.' : 'تصلك رسالة بقراءة الصباح والظهر والمساء مع كلمة تشجيع. على الآيفون: ثبّت التطبيق على الشاشة الرئيسية أولًا.'}</div>
       ${pushOn ? `<button class="btn btn-outline btn-sm" data-push-toggle="off">إيقاف الإشعارات الفورية</button>` : `<button class="btn btn-gold btn-sm" data-push-toggle="on">تفعيل الإشعارات الفورية</button>`}
     </div>
   </div>`;
@@ -1224,11 +1296,7 @@ function bindTodayEvents(u){
     b.onclick = ()=>{
       const i = Number(b.dataset.openPsalm);
       ui.openPsalm = (ui.openPsalm===i) ? null : i;
-      if(ui.openPsalm !== null){
-        const n = psalmForSlot(dayNumber(cairoParts()), i);
-        ui.psalmData = ui.psalmData || {}; ui.psalmErr = ui.psalmErr || {};
-        if(!ui.psalmData[n]){ delete ui.psalmErr[n]; loadPsalmText(n).then(v=>{ ui.psalmData[n] = v; render(); }).catch(e=>{ console.warn(e); ui.psalmErr[n] = true; render(); }); }
-      }
+      if(ui.openPsalm !== null){ const r = readingForSlot(dayNumber(cairoParts()), i); ensureChapter(r.book, r.chap); }
       render();
     };
   });
@@ -1236,10 +1304,16 @@ function bindTodayEvents(u){
     b.onclick = ()=>{
       const i = Number(b.dataset.readPsalm), dn = dayNumber(cairoParts()), dk = dateKeyOf(dn);
       const was = !!(readLog(u)[dk] || [])[i]; setRead(u, dk, i, !was);
-      if(!was && (readLog(u)[dk]||[]).filter(Boolean).length===3) showToast('🎉 أحسنت! أكملت مزامير اليوم');
+      if(!was && (readLog(u)[dk]||[]).filter(Boolean).length===3) showToast('🎉 أحسنت! أكملت قراءات اليوم');
       render();
     };
   });
+  /* the library: any book, any chapter */
+  const libBook = document.getElementById('libBook'), libChap = document.getElementById('libChap');
+  if(libBook) libBook.onchange = ()=>{ ui.lib.book = Number(libBook.value); ui.lib.chap = 1; if(ui.lib.open) ensureChapter(ui.lib.book, 1); render(); };
+  if(libChap) libChap.onchange = ()=>{ ui.lib.chap = Number(libChap.value); if(ui.lib.open) ensureChapter(ui.lib.book, ui.lib.chap); render(); };
+  document.querySelectorAll('[data-lib-open]').forEach(b=>{ b.onclick = ()=>{ ui.lib.open = !ui.lib.open; if(ui.lib.open) ensureChapter(ui.lib.book, ui.lib.chap); render(); }; });
+  document.querySelectorAll('[data-lib-step]').forEach(b=>{ b.onclick = ()=>{ const n = stepChapter(ui.lib.book, ui.lib.chap, Number(b.dataset.libStep)); ui.lib.book = n.book; ui.lib.chap = n.chap; ui.lib.open = true; ensureChapter(n.book, n.chap); render(); }; });
   document.querySelectorAll('[data-remind-time]').forEach(el=>{
     el.addEventListener('change', ()=>{ const cfg = getRemind(); cfg.times[Number(el.dataset.remindTime)] = el.value || cfg.times[Number(el.dataset.remindTime)]; saveRemind(cfg); scheduleReminders(); showToast('تم حفظ المواعيد.'); });
   });
@@ -1251,11 +1325,12 @@ function bindTodayEvents(u){
       const perm = await Notification.requestPermission();
       if(perm !== 'granted'){ showToast('لم يتم السماح بالإشعارات.'); render(); return; }
       cfg.on = true; saveRemind(cfg); scheduleReminders(); showToast('تم تفعيل التذكير ✓');
-      showLocalNotification('📖 مزامير اليوم', 'سنذكّرك في المواعيد التي اخترتها 🙏', 'psalm-welcome');
+      showLocalNotification('📖 قراءات اليوم', 'سنذكّرك في المواعيد التي اخترتها 🙏', 'read-welcome');
       render();
     };
   });
   document.querySelectorAll('[data-enable-push]').forEach(b=>{ b.onclick = ()=> enablePush(u); });
+  document.querySelectorAll('[data-dismiss-nudge]').forEach(b=>{ b.onclick = ()=>{ try{ localStorage.setItem('khidma_nudge_until', String(Date.now() + 3*24*3600*1000)); }catch(e){} render(); }; });
   document.querySelectorAll('[data-push-toggle]').forEach(b=>{ b.onclick = ()=>{ if(b.dataset.pushToggle==='on') enablePush(u); else disablePush(); }; });
 }
 
@@ -1282,9 +1357,9 @@ function renderSettings(u){
       ${themeSwitcherHTML()}
     </div>
 
-    <div class="card px-3 py-2 mb-3" style="text-align:center;">
+    ${isInstalled() ? '' : `<div class="card px-3 py-2 mb-3" style="text-align:center;">
       <button class="btn btn-teal install-app-btn" onclick="triggerInstall()">📲 تثبيت التطبيق على الشاشة الرئيسية</button>
-    </div>
+    </div>`}
 
     <div class="card p-3 mb-3">
       <b style="font-size:14px;">تغيير كلمة المرور</b>
@@ -1314,7 +1389,7 @@ function renderNews(u){
   return `
   <div class="screen">
     <h2 class="section-title">الأخبار والإعلانات</h2>
-    ${pushIsOn() ? '' : `<div class="card p-3 mb-3 push-nudge"><div class="mb-2">🔔 فعّل الإشعارات لتصلك الإعلانات الجديدة فورًا، حتى والتطبيق مغلق.</div><button class="btn btn-gold btn-sm" data-enable-push>تفعيل الإشعارات</button></div>`}
+    ${pushNudgeVisible() ? `<div class="card p-3 mb-3 push-nudge"><div class="mb-2">🔔 فعّل الإشعارات لتصلك الإعلانات الجديدة فورًا، حتى والتطبيق مغلق.</div><div class="d-flex gap-2"><button class="btn btn-gold btn-sm" data-enable-push>تفعيل الإشعارات</button><button class="btn btn-outline btn-sm" data-dismiss-nudge>لاحقًا</button></div></div>` : ''}
     ${canPost ? `<div class="card p-3 mb-3">
       <div class="mb-3"><input class="form-control" type="text" id="news_title" placeholder="عنوان الخبر"></div>
       <div class="mb-3"><textarea class="form-control" id="news_body" placeholder="تفاصيل الإعلان..."></textarea></div>
@@ -2192,61 +2267,91 @@ function renderAdminLog(){
 /* ---------------- SCANNER ---------------- */
 function renderScanOverlay(){
   return `<div class="scan-overlay">
-    <div class="scan-top"><span></span><button id="closeScanBtn">✕</button></div>
+    <div class="scan-top"><span class="scan-count" id="scanCount">0 ✓</span><button id="closeScanBtn" aria-label="إغلاق">✕</button></div>
     <video id="scanVideo" playsinline muted autoplay></video>
     <div class="scan-frame"></div>
-    <canvas id="scanCanvas" style="display:none;"></canvas>
     <div class="scan-status" id="scanStatus">وجّه الكاميرا نحو رمز QR الخاص بالعضو</div>
   </div>`;
 }
-let scanStream = null, scanRAF = null;
+/* The scanner stays open so you can scan a whole class one after the other; press ✕ when you are done.
+   While it is open nothing redraws the screen, so the camera never restarts or flickers. */
+let scanStream = null, scanRAF = null, scanBusy = false, scanLast = { code:null, t:0 }, scanCount = 0, scanMsgTimer = null;
+const SCAN_PROMPT = 'وجّه الكاميرا نحو رمز QR الخاص بالعضو';
+function setScanStatus(text, state){
+  const st = document.getElementById('scanStatus'); if(st) st.textContent = text;
+  const fr = document.querySelector('.scan-frame'); if(fr){ fr.classList.toggle('ok', state==='ok'); fr.classList.toggle('bad', state==='bad'); }
+}
+function scanFeedback(ok, text){
+  if(navigator.vibrate){ try{ navigator.vibrate(ok ? 80 : [60,40,60]); }catch(e){} }
+  setScanStatus(text, ok ? 'ok' : 'bad');
+  const c = document.getElementById('scanCount'); if(c) c.textContent = scanCount + ' ✓';
+  clearTimeout(scanMsgTimer);
+  scanMsgTimer = setTimeout(()=>setScanStatus(scanCount ? 'جاهز للعضو التالي — اضغط ✕ عند الانتهاء' : SCAN_PROMPT, null), 1800);
+}
 function startScanner(){
   const video = document.getElementById('scanVideo');
   if(!video || video.dataset.started) return;
   video.dataset.started = '1';
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    document.getElementById('scanStatus').textContent = 'الكاميرا غير متاحة في هذا المتصفح.'; return;
-  }
-  navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment' } }).then(stream=>{
-    scanStream = stream; video.srcObject = stream; video.play();
-    const canvas = document.getElementById('scanCanvas'); const ctx = canvas.getContext('2d');
-    function tick(){
+  if(scanStream){ video.srcObject = scanStream; video.play().catch(()=>{}); return; }   // the screen was redrawn: just re-attach the running camera
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ setScanStatus('الكاميرا غير متاحة في هذا المتصفح.', 'bad'); return; }
+  navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false }).then(stream=>{
+    if(!ui.scanning){ stream.getTracks().forEach(t=>t.stop()); return; }       // it was closed before the camera finished opening
+    scanStream = stream;
+    const v = document.getElementById('scanVideo'); if(v){ v.srcObject = stream; v.play().catch(()=>{}); }
+    let detector = null;
+    try{ if('BarcodeDetector' in window) detector = new BarcodeDetector({ formats:['qr_code'] }); }catch(e){ detector = null; }   // the phone's own fast QR reader
+    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently:true });
+    let last = 0;
+    const tick = async (now)=>{
       if(!ui.scanning) return;
-      if(video.readyState === video.HAVE_ENOUGH_DATA && window.jsQR){
-        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        ctx.drawImage(video,0,0,canvas.width,canvas.height);
-        const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-        const code = window.jsQR(img.data, img.width, img.height);
-        if(code && code.data){ handleScanResult(code.data); return; }
-      }
       scanRAF = requestAnimationFrame(tick);
-    }
+      const vid = document.getElementById('scanVideo');
+      if(!vid || vid.readyState < 2 || scanBusy || now - last < 140) return;   // look about 7 times a second, not 60
+      last = now; scanBusy = true;
+      try{
+        let value = null;
+        if(detector){ const r = await detector.detect(vid); if(r && r[0]) value = r[0].rawValue; }
+        else if(window.jsQR && vid.videoWidth){
+          const k = Math.min(1, 480 / Math.max(vid.videoWidth, vid.videoHeight));   // shrink the picture: 4x faster, still reads fine
+          canvas.width = Math.round(vid.videoWidth*k); canvas.height = Math.round(vid.videoHeight*k);
+          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const c = window.jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
+          if(c && c.data) value = c.data;
+        }
+        if(value) handleScanResult(value);
+      }catch(e){ /* a bad frame: just try the next one */ }
+      finally{ scanBusy = false; }
+    };
     scanRAF = requestAnimationFrame(tick);
-  }).catch(()=>{ const s = document.getElementById('scanStatus'); if(s) s.textContent = 'تعذّر الوصول إلى الكاميرا. تأكد من إذن الكاميرا.'; });
+  }).catch(()=>{ setScanStatus('تعذّر الوصول إلى الكاميرا. تأكد من إذن الكاميرا.', 'bad'); });
 }
 function stopScanner(){
   ui.scanning = false;
-  if(scanRAF) cancelAnimationFrame(scanRAF);
+  if(scanRAF) cancelAnimationFrame(scanRAF); scanRAF = null;
+  clearTimeout(scanMsgTimer);
   if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream = null; }
+  scanBusy = false;
 }
 function handleScanResult(data){
+  const now = Date.now();
+  if(data === scanLast.code && now - scanLast.t < 3000) return;     // same card still in front of the camera
+  scanLast = { code:data, t:now };
   const u = currentUser();
-  const match = /^khidma-member:(.+)$/.exec(data.trim());
-  const memberId = match ? match[1] : null;
-  const member = memberId ? state.users.find(x=>x.id===memberId && x.role==='makhdoum') : null;
-  stopScanner();
-  if(!member){ showToast('رمز غير صالح.'); render(); return; }
+  const match = /^khidma-member:(.+)$/.exec(String(data).trim());
+  const member = match ? state.users.find(x=>x.id===match[1] && x.role==='makhdoum') : null;
+  if(!member){ scanFeedback(false, 'رمز غير صالح'); return; }
   const cls = classroomOf(ui.adminAttClassroom);
-  if(!cls || member.classroomId !== cls.id){ showToast('هذا العضو ليس ضمن الفصل الحالي.'); render(); return; }
+  if(!cls || member.classroomId !== cls.id){ scanFeedback(false, member.name + ' ليس ضمن الفصل الحالي'); return; }
   const date = todayStr();
   let rec = state.attendance.find(a=>a.memberId===member.id && a.date===date);
   if(!rec){ rec = { id:uid('att'), memberId:member.id, classroomId:cls.id, date, quddas:false, ijtimaa:false, markedBy:u.id }; state.attendance.push(rec); }
-  if(!rec.quddas){ rec.quddas = true; awardPoints(member, state.settings.pointsQuddas, 'حضور القداس (مسح)', u.name); }
+  const already = !!rec.quddas;
+  if(!already){ rec.quddas = true; awardPoints(member, state.settings.pointsQuddas, 'حضور القداس (مسح)', u.name); log(u.name, `سجّل حضور ${member.name} عبر المسح الضوئي.`); }
   rec.markedBy = u.id;
-  log(u.name, `سجّل حضور ${member.name} عبر المسح الضوئي.`);
   persist();
-  showToast(`تم تسجيل حضور ${member.name} ✓`);
-  render();
+  if(!already) scanCount++;
+  scanFeedback(true, already ? member.name + ' مسجَّل مسبقًا ✓' : 'تم تسجيل حضور ' + member.name + ' ✓');
 }
 
 /* =========================================================================
@@ -2344,7 +2449,7 @@ function bindAppEvents(u){
     };
   });
   const openScanBtn = document.getElementById('openScanBtn');
-  if(openScanBtn) openScanBtn.onclick = ()=>{ ui.scanning = true; render(); };
+  if(openScanBtn) openScanBtn.onclick = ()=>{ scanCount = 0; scanLast = { code:null, t:0 }; ui.scanning = true; render(); };
   const closeScanBtn = document.getElementById('closeScanBtn');
   if(closeScanBtn) closeScanBtn.onclick = ()=>{ stopScanner(); render(); };
 
@@ -2671,16 +2776,28 @@ let deferredInstallPrompt = null;
     window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker registration failed:', e)); });
   }
 })();
+/* true when the app is already installed / opened from the home screen: then no install buttons are shown */
+function isInstalled(){
+  try{
+    return (window.matchMedia && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches))
+      || window.navigator.standalone === true
+      || localStorage.getItem('khidma_installed') === '1';
+  }catch(e){ return false; }
+}
 window.addEventListener('beforeinstallprompt', (e)=>{
   e.preventDefault();
   deferredInstallPrompt = e;
+  try{ localStorage.removeItem('khidma_installed'); }catch(err){}   // the browser offers to install again, so it is not installed (any more)
 });
-window.addEventListener('appinstalled', ()=>{ deferredInstallPrompt = null; showToast('تم تثبيت التطبيق بنجاح ✓'); render(); });
+window.addEventListener('appinstalled', ()=>{ deferredInstallPrompt = null; try{ localStorage.setItem('khidma_installed','1'); }catch(e){} showToast('تم تثبيت التطبيق بنجاح ✓'); });
 async function triggerInstall(){
   if(deferredInstallPrompt){
     deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
+    let choice = null;
+    try{ choice = await deferredInstallPrompt.userChoice; }catch(e){}
     deferredInstallPrompt = null;
+    if(choice && choice.outcome === 'accepted'){ try{ localStorage.setItem('khidma_installed','1'); }catch(e){} }
+    render();
   } else {
     showToast('لتثبيت التطبيق: افتح قائمة المتصفح واختر "إضافة إلى الشاشة الرئيسية".');
   }
