@@ -1,5 +1,5 @@
 /* خِدمة service worker: network-first (updates always win), cached copy only when offline. */
-const CACHE = 'khidma-shell-v16';
+const CACHE = 'khidma-shell-v17';
 const META = 'khidma-meta';      // tiny note the app leaves here: which church + member this phone belongs to
 const SUPABASE_URL = 'https://owpkjnbnyfldnmubfzsy.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_FeyMhWVyMkFYhOzXllF9ig_08zVqWC8';

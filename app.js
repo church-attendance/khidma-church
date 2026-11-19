@@ -3,7 +3,7 @@
    Client-only demo: persistence via localStorage on this device only.
    ======================================================================= */
 
-const APP_VERSION = 'v14.2 · whole Bible + bubbly + announcement notifications';
+const APP_VERSION = 'v14.3 · class promotion + whole Bible + bubbly';
 const STORAGE_PREFIX = 'khidma_church_app_v3_';
 const CHURCH_CODE_KEY = 'khidma_church_code';
 
@@ -2012,6 +2012,98 @@ function renderChatThread(u, chat){
 }
 
 /* ---------------- ADMIN ---------------- */
+/* ---------------- YEARLY PROMOTION: everyone moves up one class, in the order the church admin sets ---------------- */
+/* The admin arranges the classes from youngest to oldest (the list can cross stages: the last class of one stage is followed by the first
+   class of the next, e.g. last primary class -> first preparatory class). Each class's members move to the class right after it. */
+function orderedClassrooms(){
+  const ord = c => typeof c.order === 'number' ? c.order : 1e9;
+  return state.classrooms.map((c,i)=>({ c, i })).sort((a,b)=> (ord(a.c) - ord(b.c)) || (a.i - b.i)).map(x=>x.c);
+}
+function moveClassInOrder(id, dir){
+  const list = orderedClassrooms(), i = list.findIndex(c=>c.id===id), j = i + dir;
+  if(i < 0 || j < 0 || j >= list.length) return false;
+  [list[i], list[j]] = [list[j], list[i]];
+  list.forEach((c,k)=>{ c.order = k; });
+  return true;
+}
+function stageNameOf(c){ return (c && c.stageId && stageOf(c.stageId)) ? stageOf(c.stageId).name : 'بدون مرحلة'; }
+function promotionPlan(lastMode){
+  const list = orderedClassrooms();
+  const moves = [];       // [memberId, fromClass, fromStage, toClass, toStage]
+  state.users.filter(x=>x.role==='makhdoum' && x.status==='approved' && x.classroomId).forEach(m=>{
+    const i = list.findIndex(c=>c.id===m.classroomId); if(i < 0) return;
+    if(i < list.length - 1) moves.push([m.id, m.classroomId, m.stageId || null, list[i+1].id, list[i+1].stageId || null]);
+    else if(lastMode === 'graduate') moves.push([m.id, m.classroomId, m.stageId || null, null, null]);
+  });
+  return { list, moves };
+}
+function runPromotion(u, lastMode, announce){
+  const { moves } = promotionPlan(lastMode);
+  if(!moves.length){ showToast('لا يوجد أعضاء للترقية.'); return; }
+  moves.forEach(([id,,, to, toStage])=>{ const m = state.users.find(x=>x.id===id); if(m){ m.classroomId = to; m.stageId = toStage; } });
+  state.settings.lastPromotion = { at: nowISO(), by: u.name, moves };      // kept so it can be undone
+  log(u.name, `نفّذ ترقية الفصول: نُقل ${moves.length} عضوًا إلى الفصل التالي.`);
+  if(announce) state.news.push({ id:uid('news'), title:'🎓 ترقية الفصول للعام الجديد', content:'تمت ترقية كل مخدوم إلى الفصل التالي. افتح التطبيق لتعرف فصلك الجديد.', stageId:null, authorName:u.name, authorId:u.id, createdAt: nowISO() });
+  persist(); showToast(`🎓 تمت ترقية ${moves.length} عضوًا`);
+}
+function undoPromotion(u){
+  const lp = state.settings.lastPromotion; if(!lp) return;
+  let n = 0;
+  lp.moves.forEach(([id, from, fromStage, to])=>{
+    const m = state.users.find(x=>x.id===id);
+    if(m && (m.classroomId || null) === (to || null)){        // only if nobody moved this member again since
+      const back = from && classroomOf(from) ? from : null;
+      m.classroomId = back; m.stageId = back ? fromStage : null; n++;
+    }
+  });
+  delete state.settings.lastPromotion;
+  log(u.name, `تراجع عن آخر ترقية للفصول: أُعيد ${n} عضوًا إلى فصولهم السابقة.`);
+  persist(); showToast(`↩︎ أُعيد ${n} عضوًا إلى فصولهم`);
+}
+function renderAdminPromote(u){
+  const mode = ui.promoLast || 'stay', announce = ui.promoAnnounce !== false;
+  const { list, moves } = promotionPlan(mode);
+  if(list.length < 2) return `<div class="empty"><div class="big">🎓</div>أضف فصلين على الأقل من تبويب «الخدام والفصول» ثم رتّبهم هنا.</div>`;
+  const rows = list.map((c,i)=>{
+    const next = list[i+1], n = membersOfClassroom(c.id).length;
+    const crosses = next && (next.stageId || null) !== (c.stageId || null);
+    const dest = next ? `↳ ينتقلون إلى: <b>${escapeHtml(next.name)}</b>${crosses ? ` <span class="badge rounded-pill badge-gold">مرحلة ${escapeHtml(stageNameOf(next))}</span>` : ''}`
+                      : (mode === 'graduate' ? '🎓 يتخرجون (يصبحون بدون فصل)' : '↳ يبقون في هذا الفصل (آخر فصل)');
+    return `<div class="card px-3 py-2 mb-2">
+      <div class="d-flex justify-content-between align-items-center gap-2">
+        <div style="min-width:0;"><b>${i+1}. ${escapeHtml(c.name)}</b><div class="muted">${escapeHtml(stageNameOf(c))} · ${n} ${n===1?'عضو':'أعضاء'}</div></div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-outline btn-sm" data-move-class="${c.id}" data-dir="-1" ${i===0?'disabled':''} aria-label="إلى الأعلى">▲</button>
+          <button class="btn btn-outline btn-sm" data-move-class="${c.id}" data-dir="1" ${i===list.length-1?'disabled':''} aria-label="إلى الأسفل">▼</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:6px;">${dest}</div>
+    </div>`;
+  }).join('');
+  const lp = state.settings.lastPromotion;
+  return `
+    <div class="card p-3 mb-3">
+      <b>🎓 ترقية الفصول للعام الجديد</b>
+      <div class="muted" style="margin-top:6px;">رتّب الفصول من <b>الأصغر (فوق)</b> إلى <b>الأكبر (تحت)</b> بالأسهم. عند الترقية ينتقل كل مخدوم إلى الفصل الذي يليه في هذا الترتيب، وآخر فصل في مرحلة ينتقل أعضاؤه إلى أول فصل في المرحلة التالية. الخدام يبقون في فصولهم.</div>
+    </div>
+    ${rows}
+    <div class="card p-3 mb-3">
+      <label class="form-label">أعضاء آخر فصل في الترتيب</label>
+      <select class="form-select mb-3" id="promoLast">
+        <option value="stay" ${mode==='stay'?'selected':''}>يبقون في فصلهم</option>
+        <option value="graduate" ${mode==='graduate'?'selected':''}>يتخرجون (يصبحون بدون فصل)</option>
+      </select>
+      <label class="d-flex align-items-center gap-2 mb-3" style="cursor:pointer;"><input type="checkbox" id="promoAnnounce" ${announce?'checked':''} style="width:18px;height:18px;accent-color:var(--ink);"> <span>نشر إعلان للجميع بالترقية (يصل كإشعار)</span></label>
+      <div class="muted mb-2">سيتم نقل <b>${moves.length}</b> ${moves.length===1?'عضو':'عضوًا'}.</div>
+      <button class="btn btn-danger" id="promoRunBtn" ${moves.length?'':'disabled'}>🎓 تنفيذ الترقية الآن</button>
+    </div>
+    ${lp ? `<div class="card p-3 mb-3">
+      <b>آخر ترقية</b>
+      <div class="muted" style="margin:6px 0 10px;">${fmtDate(lp.at)} · بواسطة ${escapeHtml(lp.by)} · ${lp.moves.length} عضوًا</div>
+      <button class="btn btn-outline" id="promoUndoBtn">↩︎ التراجع عن آخر ترقية</button>
+    </div>` : ''}`;
+}
+
 function renderAdmin(u){
   const sub = ui.adminSub || 'pending';
   const isDirector = u.role==='senior_admin';
@@ -2026,11 +2118,13 @@ function renderAdmin(u){
     <div class="segmented">
       <button class="${sub==='pending'?'active':''}" data-adminsub="pending">طلبات الانتظار ${pendingUsers.length?('('+pendingUsers.length+')'):''}</button>
       <button class="${sub==='people'?'active':''}" data-adminsub="people">الخدام والفصول</button>
+      ${isDirector ? `<button class="${sub==='promote'?'active':''}" data-adminsub="promote">🎓 الترقية</button>` : ''}
       ${isDirector ? `<button class="${sub==='emergency'?'active':''}" data-adminsub="emergency">كود الطوارئ</button>` : ''}
       <button class="${sub==='log'?'active':''}" data-adminsub="log">سجل النشاط</button>
     </div>
     ${sub==='pending' ? renderAdminPending(pendingUsers, u) : ''}
     ${sub==='people' ? renderAdminPeople(u) : ''}
+    ${sub==='promote' && isDirector ? renderAdminPromote(u) : ''}
     ${sub==='emergency' && isDirector ? renderAdminEmergency() : ''}
     ${sub==='log' ? renderAdminLog() : ''}
   </div>`;
@@ -2538,6 +2632,19 @@ function bindAppEvents(u){
 
   // ADMIN
   document.querySelectorAll('[data-adminsub]').forEach(b=>{ b.onclick = ()=>{ ui.adminSub = b.dataset.adminsub; render(); }; });
+  /* promotion */
+  document.querySelectorAll('[data-move-class]').forEach(b=>{ b.onclick = ()=>{ if(moveClassInOrder(b.dataset.moveClass, Number(b.dataset.dir))){ log(u.name, 'غيّر ترتيب الفصول.'); persist(); } render(); }; });
+  const promoLast = document.getElementById('promoLast'); if(promoLast) promoLast.onchange = ()=>{ ui.promoLast = promoLast.value; render(); };
+  const promoAnnounce = document.getElementById('promoAnnounce'); if(promoAnnounce) promoAnnounce.onchange = ()=>{ ui.promoAnnounce = promoAnnounce.checked; render(); };
+  const promoRunBtn = document.getElementById('promoRunBtn');
+  if(promoRunBtn) promoRunBtn.onclick = ()=>{
+    if(u.role !== 'senior_admin') return;
+    const mode = ui.promoLast || 'stay', { moves } = promotionPlan(mode);
+    if(!moves.length){ showToast('لا يوجد أعضاء للترقية.'); return; }
+    askConfirm(`سيتم نقل ${moves.length} عضوًا إلى الفصل التالي حسب الترتيب المعروض. يمكنك التراجع بعد ذلك. هل تريد المتابعة؟`, ()=> runPromotion(u, mode, ui.promoAnnounce !== false));
+  };
+  const promoUndoBtn = document.getElementById('promoUndoBtn');
+  if(promoUndoBtn) promoUndoBtn.onclick = ()=>{ if(u.role !== 'senior_admin') return; askConfirm('إعادة كل من نُقل في آخر ترقية إلى فصله السابق؟ (لن يتأثر من تغيّر فصله بعد ذلك)', ()=> undoPromotion(u)); };
   document.querySelectorAll('[data-approve]').forEach(b=>{ b.onclick = ()=>{ const p = state.users.find(x=>x.id===b.dataset.approve); const sel = document.querySelector(`[data-pending-cls="${p.id}"]`); const clsId = sel && sel.value ? sel.value : null; p.status='approved'; p.classroomId = clsId; const cls = clsId ? classroomOf(clsId) : null; if(cls) p.stageId = cls.stageId; log(u.name, cls ? `وافق على انضمام ${p.name} وعيّنه لفصل "${cls.name}".` : `وافق على انضمام ${p.name}.`); persist(); render(); }; });
   document.querySelectorAll('[data-reject]').forEach(b=>{ b.onclick = ()=>{ const p = state.users.find(x=>x.id===b.dataset.reject); p.status='rejected'; log(u.name, `رفض طلب انضمام ${p.name}.`); persist(); render(); }; });
   const addClassroomBtn = document.getElementById('addClassroomBtn');
