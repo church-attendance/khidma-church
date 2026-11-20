@@ -3,7 +3,7 @@
    Client-only demo: persistence via localStorage on this device only.
    ======================================================================= */
 
-const APP_VERSION = 'v14.3 · class promotion + whole Bible + bubbly';
+const APP_VERSION = 'v15 · redesigned tabs + new tab bar';
 const STORAGE_PREFIX = 'khidma_church_app_v3_';
 const CHURCH_CODE_KEY = 'khidma_church_code';
 
@@ -369,6 +369,13 @@ function myClassrooms(u){
   return state.classrooms.filter(c=>c.servantIds.includes(u.id));
 }
 function initials(name){ return (name||'?').trim().split(' ')[0].slice(0,1); }
+/* ---------- shared look: a coloured hero on top of every tab + icon-headed cards + chips ---------- */
+function heroHTML(key, ic, title, sub, extra){
+  return `<div class="hero hero-${key}"><div class="hero-ic">${ic}</div><div class="hero-txt"><h2>${title}</h2>${sub ? `<div class="hero-sub">${sub}</div>` : ''}</div>${extra ? `<div class="hero-extra">${extra}</div>` : ''}</div>`;
+}
+function cardHead(ic, title, sub){
+  return `<div class="card-head"><span class="bub">${ic}</span><div class="ch-txt"><b>${title}</b>${sub ? `<div class="muted">${sub}</div>` : ''}</div></div>`;
+}
 function fmtTime(iso){ const d=new Date(iso); return d.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDate(iso){ const d=new Date(iso); return d.toLocaleDateString('ar-EG',{day:'numeric',month:'short'}); }
 function escapeHtml(s){
@@ -922,10 +929,10 @@ function bindPendingEvents(){ const b = document.getElementById('logoutBtn2'); i
 /* ---------------- APP SHELL ---------------- */
 function tabsFor(role){
   if(role==='makhdoum') return [
-    {id:'today', label:'اليوم', ic:'📖'}, {id:'news', label:'الأخبار', ic:'📰'}, {id:'mine', label:'حضوري', ic:'✅'}, {id:'chat', label:'الدردشة', ic:'💬'}, {id:'settings', label:'الإعدادات', ic:'⚙️'},
+    {id:'today', label:'اليوم', ic:'📖'}, {id:'news', label:'الأخبار', ic:'📰'}, {id:'mine', label:'حضوري', ic:'⭐'}, {id:'chat', label:'الدردشة', ic:'💬'}, {id:'settings', label:'الإعدادات', ic:'⚙️'},
   ];
   const base = [
-    {id:'today', label:'اليوم', ic:'📖'}, {id:'news', label:'الأخبار', ic:'📰'}, {id:'ministry', label:'الخدمة', ic:'🗂️'}, {id:'chat', label:'الدردشة', ic:'💬'},
+    {id:'today', label:'اليوم', ic:'📖'}, {id:'news', label:'الأخبار', ic:'📰'}, {id:'ministry', label:'الخدمة', ic:'🏫'}, {id:'chat', label:'الدردشة', ic:'💬'},
   ];
   if(role==='senior_admin' || role==='super_admin') base.push({id:'admin', label:'الإدارة', ic:'🛡️'});
   base.push({id:'settings', label:'الإعدادات', ic:'⚙️'});
@@ -950,7 +957,7 @@ function renderApp(u){
   </div>
   ${emergencyBanner}
   <div class="content" id="contentArea">${renderTab(u, ui.activeTab)}</div>
-  <div class="tabbar">${tabs.map(t=>`<button class="tab ${ui.activeTab===t.id?'active':''}" data-tab="${t.id}"><span class="ic">${t.ic}</span>${t.label}</button>`).join('')}</div>
+  <div class="tabbar">${tabs.map(t=>`<button class="tab ${ui.activeTab===t.id?'active':''}" data-tab="${t.id}" ${ui.activeTab===t.id?'aria-current="page"':''}><span class="ic">${t.ic}</span><span class="lb">${t.label}</span></button>`).join('')}</div>
   ${ui.scanning ? renderScanOverlay() : ''}
   ${ui.confirm ? `<div class="confirm-overlay"><div class="confirm-box"><p>${escapeHtml(ui.confirm.message)}</p><div class="d-flex gap-2 equal-cols"><button class="btn btn-outline btn-sm" id="confirmNo" style="flex:1;">إلغاء</button><button class="btn btn-danger btn-sm" id="confirmYes" style="flex:1;">تأكيد</button></div></div></div>` : ''}
   `;
@@ -1104,8 +1111,7 @@ function libraryCardHTML(){
   const chaps = Array.from({ length: BIBLE_BOOKS[lib.book-1][1] }, (_,i)=>`<option value="${i+1}" ${lib.chap===i+1?'selected':''}>${i+1}</option>`).join('');
   return `
     <div class="card p-3 mb-3">
-      <b>📚 الكتاب المقدس كله</b>
-      <div class="muted mb-2">اقرأ أي سفر وأي إصحاح، في أي وقت.</div>
+      ${cardHead('📚','الكتاب المقدس كله','اقرأ أي سفر وأي إصحاح، في أي وقت.')}
       <div class="d-flex gap-2 mb-2">
         <select class="form-select" id="libBook" style="flex:1;" aria-label="السفر">${books}</select>
         <select class="form-select" id="libChap" style="width:96px;" aria-label="الإصحاح">${chaps}</select>
@@ -1240,6 +1246,9 @@ function renderToday(u){
   const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
   const pushOn = localStorage.getItem('khidma_push_on')==='1' && perm==='granted';
   const remindOn = cfg.on && perm==='granted';
+  const greet = c.h < 12 ? 'صباح الخير' : c.h < 18 ? 'نهارك سعيد' : 'مساء الخير';
+  const heroIc = c.h < 12 ? '🌅' : c.h < 18 ? '☀️' : '🌙';
+  const first = escapeHtml(u.name.split(' ')[0]);
   const readingCard = (s, i)=>{
     const r = readingForSlot(dn, i), open = ui.openPsalm === i, read = !!done[i];
     let body = '';
@@ -1248,13 +1257,11 @@ function renderToday(u){
       body += `<button class="btn ${read?'btn-outline':'btn-teal'} btn-sm" data-read-psalm="${i}">${read?'↩︎ إلغاء علامة القراءة':'✓ قرأته'}</button>`;
     }
     return `
-    <div class="card p-3 mb-3">
-      <div class="d-flex justify-content-between align-items-center gap-2">
-        <div><b style="font-size:15px;">${s.ic} ${s.name}</b><div class="muted">${escapeHtml(r.label)}</div></div>
-        <div class="d-flex align-items-center gap-2">
-          ${read ? `<span class="badge rounded-pill badge-ok">✓ تمت</span>` : ''}
-          <button class="btn btn-gold btn-sm" data-open-psalm="${i}">${open?'إخفاء':'📖 اقرأ'}</button>
-        </div>
+    <div class="card read-card slot-${i} ${read?'done':''} mb-3">
+      <div class="read-main">
+        <div class="read-ic">${s.ic}${read ? '<span class="read-tick">✓</span>' : ''}</div>
+        <div class="read-txt"><b>${s.name}</b><div class="muted">${escapeHtml(r.label)}</div></div>
+        <button class="btn btn-gold btn-sm" data-open-psalm="${i}">${open?'إخفاء':'📖 اقرأ'}</button>
       </div>
       ${body}
     </div>`;
@@ -1264,23 +1271,22 @@ function renderToday(u){
     : `اليوم ${(planDay(dn) % PLAN_DAYS) + 1} من ${PLAN_DAYS} في قراءة الكتاب المقدس كله`;
   const timeRow = PSALM_SLOTS.map((s,i)=>`<div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label m-0">${s.ic} ${s.name}</label><input class="form-control" type="time" style="width:150px;" value="${cfg.times[i]}" data-remind-time="${i}"></div>`).join('');
   return `
-  <div class="screen">
-    <h2 class="section-title">اليوم</h2>
-    <div class="card p-3 mb-3" style="text-align:center;">
-      <div class="muted">✨ كلمة اليوم</div>
-      <p style="font-size:17px;line-height:1.9;margin:8px 0;font-weight:700;color:var(--heading);">«${escapeHtml(w.t)}»</p>
-      ${w.r ? `<div class="muted">${escapeHtml(w.r)}</div>` : ''}
+  <div class="screen tab-today">
+    ${heroHTML('today', heroIc, 'اليوم', `${greet} يا ${first} 👋`, streak ? `<span class="hero-chip">🔥 ${streak}</span>` : '')}
+    <div class="card quote-card p-3">
+      <div class="quote-label">✨ كلمة اليوم</div>
+      <p class="quote-text">«${escapeHtml(w.t)}»</p>
+      ${w.r ? `<div class="quote-ref">${escapeHtml(w.r)}</div>` : ''}
     </div>
     <div class="card p-3 mb-3">
-      <div class="d-flex justify-content-between align-items-center"><b>قراءات اليوم</b><span class="badge rounded-pill badge-gold">${count} / 3</span></div>
-      <div class="today-progress mt-2"><span style="width:${Math.round(count/3*100)}%"></span></div>
-      <div class="muted mt-2">${count===3 ? '🎉 أحسنت! أكملت قراءات اليوم' : (streak ? `🔥 ${streak} ${streak===1?'يوم':'أيام'} متتالية — لا تقطع السلسلة` : 'ابدأ سلسلتك اليوم 🔥')} · ${planNote}</div>
+      <div class="d-flex justify-content-between align-items-center mb-3"><b class="card-title">قراءات اليوم</b><span class="badge rounded-pill badge-gold">${count} / 3</span></div>
+      <div class="sum-dots">${PSALM_SLOTS.map((sl,i)=>`<div class="sum-slot"><div class="sum-dot ${done[i]?'on':''}">${done[i]?'✓':sl.ic}</div><small>${['الصباح','الظهر','المساء'][i]}</small></div>`).join('')}</div>
+      <div class="muted mt-3" style="text-align:center;">${count===3 ? '🎉 أحسنت! أكملت قراءات اليوم' : (streak ? `🔥 ${streak} ${streak===1?'يوم':'أيام'} متتالية — لا تقطع السلسلة` : 'ابدأ سلسلتك اليوم 🔥')} · ${planNote}</div>
     </div>
     ${PSALM_SLOTS.map(readingCard).join('')}
     ${libraryCardHTML()}
     <div class="card p-3 mb-3">
-      <b>🔔 تذكير بالقراءات</b>
-      <div class="muted mb-2">اختر مواعيدك. التذكير يعمل والتطبيق مفتوح أو في الخلفية.</div>
+      ${cardHead('🔔','تذكير بالقراءات','اختر مواعيدك. التذكير يعمل والتطبيق مفتوح أو في الخلفية.')}
       <div class="mb-3">${timeRow}</div>
       ${perm==='denied' ? `<div class="muted" style="color:var(--bad);">الإشعارات محظورة من إعدادات المتصفح لهذا الموقع.</div>`
         : `<button class="btn ${remindOn?'btn-outline':'btn-teal'} btn-sm" data-remind-toggle>${remindOn?'إيقاف التذكير':'تفعيل التذكير'}</button>`}
@@ -1338,22 +1344,21 @@ function bindTodayEvents(u){
 function renderSettings(u){
   const cls = classroomOf(u.classroomId);
   return `
-  <div class="screen">
-    <h2 class="section-title">الإعدادات</h2>
+  <div class="screen tab-settings">
+    ${heroHTML('settings', escapeHtml(initials(u.name)), escapeHtml(u.name), `${roleLabel(u.role)}${cls ? ' · '+escapeHtml(cls.name) : ''}`)}
 
     <div class="card p-3 mb-3">
-      <b style="font-size:14px;">البيانات الشخصية</b>
+      ${cardHead('👤','البيانات الشخصية')}
       <div class="mb-3" style="margin-top:10px;"><label class="form-label">الاسم بالكامل</label><input class="form-control" type="text" id="set_name" value="${escapeHtml(u.name)}"></div>
       <div class="mb-3"><label class="form-label">البريد الإلكتروني</label><input class="form-control" type="email" id="set_email" value="${escapeHtml(u.email)}"></div>
       <div class="mb-3"><label class="form-label">رقم الموبايل</label><input class="form-control" type="tel" id="set_mobile" value="${escapeHtml(u.mobile)}"></div>
       <div class="mb-3"><label class="form-label">العنوان</label><input class="form-control" type="text" id="set_address" value="${escapeHtml(u.address)}"></div>
       <div id="settingsProfileError" class="muted" style="color:var(--bad);display:none;margin-bottom:8px;"></div>
       <button class="btn btn-gold" id="saveProfileBtn">حفظ التعديلات</button>
-      <p class="muted" style="margin-top:8px;">الدور: ${roleLabel(u.role)}${cls ? ' · الفصل: '+escapeHtml(cls.name) : ''}</p>
     </div>
 
     <div class="card p-3 mb-3" style="text-align:center;">
-      <b style="font-size:14px;">المظهر</b>
+      <div style="text-align:start;">${cardHead('🎨','المظهر','فاتح أو داكن أو تلقائي')}</div>
       ${themeSwitcherHTML()}
     </div>
 
@@ -1362,7 +1367,7 @@ function renderSettings(u){
     </div>`}
 
     <div class="card p-3 mb-3">
-      <b style="font-size:14px;">تغيير كلمة المرور</b>
+      ${cardHead('🔒','تغيير كلمة المرور')}
       <div class="mb-3" style="margin-top:10px;"><label class="form-label">كلمة المرور الحالية</label><input class="form-control" type="password" id="set_pass_current"></div>
       <div class="mb-3"><label class="form-label">كلمة المرور الجديدة</label><input class="form-control" type="password" id="set_pass_new" minlength="4"></div>
       <div id="settingsPassError" class="muted" style="color:var(--bad);display:none;margin-bottom:8px;"></div>
@@ -1370,7 +1375,7 @@ function renderSettings(u){
     </div>
 
     <div class="card p-3 mb-3" style="border-color:var(--bad);">
-      <b style="font-size:14px;color:var(--bad);">منطقة الخطر</b>
+      ${cardHead('⚠️','<span style="color:var(--bad);">منطقة الخطر</span>')}
       <p class="muted" style="margin:8px 0 12px;">حذف الحساب نهائي ولا يمكن التراجع عنه.</p>
       <div class="d-flex gap-2 equal-cols">
         <button class="btn btn-outline" id="settingsLogoutBtn">تسجيل الخروج</button>
@@ -1386,11 +1391,14 @@ function renderNews(u){
   let items = [...state.news].sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt));
   if(!isAdminish(u)) items = items.filter(n=> !n.stageId || n.stageId===u.stageId);
   const globals = [...globalNewsCache].sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt));
+  const total = items.length + globals.length;
+  const aud = n => (n.stageId && stageOf(n.stageId)) ? '🎯 '+escapeHtml(stageOf(n.stageId).name) : '🌍 للجميع';
   return `
-  <div class="screen">
-    <h2 class="section-title">الأخبار والإعلانات</h2>
+  <div class="screen tab-news">
+    ${heroHTML('news', '📣', 'الأخبار والإعلانات', total ? `${total} ${total===1?'إعلان':'إعلانات'}` : 'كل جديد في خدمتنا')}
     ${pushNudgeVisible() ? `<div class="card p-3 mb-3 push-nudge"><div class="mb-2">🔔 فعّل الإشعارات لتصلك الإعلانات الجديدة فورًا، حتى والتطبيق مغلق.</div><div class="d-flex gap-2"><button class="btn btn-gold btn-sm" data-enable-push>تفعيل الإشعارات</button><button class="btn btn-outline btn-sm" data-dismiss-nudge>لاحقًا</button></div></div>` : ''}
     ${canPost ? `<div class="card p-3 mb-3">
+      ${cardHead('✍️','إعلان جديد','يصل للجميع كإشعار')}
       <div class="mb-3"><input class="form-control" type="text" id="news_title" placeholder="عنوان الخبر"></div>
       <div class="mb-3"><textarea class="form-control" id="news_body" placeholder="تفاصيل الإعلان..."></textarea></div>
       <div class="mb-3"><label class="form-label">موجّه إلى</label>
@@ -1402,22 +1410,26 @@ function renderNews(u){
       <button class="btn btn-gold" id="postNewsBtn">نشر الإعلان</button>
     </div>` : ''}
     ${globals.map(n=>`
-      <div class="card p-3 mb-3" style="border:2px solid var(--gold, #C79A3D);background:linear-gradient(180deg, rgba(199,154,61,.12), transparent);">
-        <div class="d-flex justify-content-between align-items-start gap-2">
-          <b style="font-size:15.5px;">📢 ${escapeHtml(n.title)}</b>
+      <div class="card news-card global mb-3">
+        <div class="news-ic">📢</div>
+        <div class="news-body">
+          <b class="news-title">${escapeHtml(n.title)}</b>
+          <p class="news-text">${escapeHtml(n.content)}</p>
+          <div class="news-meta"><span class="chip chip-gold">رسالة عامة من إدارة النظام</span><span class="chip">📅 ${fmtDate(n.createdAt)}</span></div>
         </div>
-        <p style="margin:8px 0 6px;font-size:14px;line-height:1.8;">${escapeHtml(n.content)}</p>
-        <div class="muted" style="font-weight:700;">رسالة عامة من إدارة النظام · ${fmtDate(n.createdAt)}</div>
       </div>`).join('')}
     ${items.length===0 && globals.length===0 ? `<div class="empty"><div class="big">📭</div>لا توجد إعلانات بعد.</div>` :
       items.map(n=>`
-      <div class="card p-3 mb-3">
-        <div class="d-flex justify-content-between align-items-start gap-2">
-          <b style="font-size:15.5px;">${escapeHtml(n.title)}</b>
-          ${(u.role==='senior_admin' || n.authorId===u.id) ? `<button class="btn-ghost" data-del-news="${n.id}" style="color:var(--bad);">حذف</button>` : ''}
+      <div class="card news-card mb-3">
+        <div class="news-ic ${n.stageId?'stage':''}">${n.stageId?'🎯':'📰'}</div>
+        <div class="news-body">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <b class="news-title">${escapeHtml(n.title)}</b>
+            ${(u.role==='senior_admin' || n.authorId===u.id) ? `<button class="btn-ghost" data-del-news="${n.id}" style="color:var(--bad);">حذف</button>` : ''}
+          </div>
+          <p class="news-text">${escapeHtml(n.content)}</p>
+          <div class="news-meta"><span class="chip">👤 ${escapeHtml(n.authorName)}</span><span class="chip">📅 ${fmtDate(n.createdAt)}</span><span class="chip">${aud(n)}</span></div>
         </div>
-        <p style="margin:8px 0 6px;font-size:14px;line-height:1.8;">${escapeHtml(n.content)}</p>
-        <div class="muted">${escapeHtml(n.authorName)} · ${fmtDate(n.createdAt)}${n.stageId && stageOf(n.stageId) ? ' · موجّه إلى: '+escapeHtml(stageOf(n.stageId).name) : ' · للجميع'}</div>
       </div>`).join('')}
   </div>`;
 }
@@ -1429,28 +1441,26 @@ function renderMine(u){
   const totalQ = records.filter(r=>r.quddas).length, totalI = records.filter(r=>r.ijtimaa).length;
   const cls = classroomOf(u.classroomId);
   const myAssignments = state.assignments.filter(a=> !a.classroomId || a.classroomId===u.classroomId);
+  const doneA = myAssignments.filter(a=>a.completions[u.id]).length;
   return `
-  <div class="screen">
-    <h2 class="section-title">حضوري ونقاطي</h2>
-    <div class="card p-3 mb-3" style="text-align:center;">
-      <div class="muted">إجمالي نقاطي</div>
-      <div style="font-size:34px;font-weight:800;color:var(--heading);">${u.points||0}</div>
-      <div id="qrHolder" style="margin:14px auto 4px;width:150px;height:150px;background:#fff;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:8px;"></div>
-      <div class="muted">أظهر هذا الرمز لأحد الخدام لتسجيل حضورك بالمسح</div>
+  <div class="screen tab-mine">
+    ${heroHTML('mine', '⭐', 'حضوري ونقاطي', `الفصل: ${cls ? escapeHtml(cls.name) : '— غير محدد —'}`, `<span class="hero-chip big">${u.points||0}<small>نقطة</small></span>`)}
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-ic">⛪</div><div class="stat-n">${totalQ}</div><div class="stat-l">حضور قداس</div></div>
+      <div class="stat"><div class="stat-ic">🤝</div><div class="stat-n">${totalI}</div><div class="stat-l">حضور اجتماع</div></div>
+      <div class="stat"><div class="stat-ic">✅</div><div class="stat-n">${doneA}<small>/${myAssignments.length}</small></div><div class="stat-l">تكليفات منجزة</div></div>
     </div>
-    <div class="card px-3 py-2 mb-3">
-      <div class="muted">الفصل: ${cls ? escapeHtml(cls.name) : '— غير محدد —'}</div>
-      <div class="d-flex gap-2 equal-cols" style="margin-top:10px;">
-        <div class="card px-3 py-2 mb-3" style="text-align:center;flex:1;margin:0;"><div style="font-size:20px;font-weight:800;color:var(--ok);">${totalQ}</div><div class="muted">حضور قداس</div></div>
-        <div class="card px-3 py-2 mb-3" style="text-align:center;flex:1;margin:0;"><div style="font-size:20px;font-weight:800;color:var(--ok);">${totalI}</div><div class="muted">حضور اجتماع</div></div>
-      </div>
+    <div class="card qr-card p-3 mb-3">
+      ${cardHead('🔳','رمز حضوري','أظهر هذا الرمز لأحد الخدام لتسجيل حضورك بالمسح')}
+      <div id="qrHolder" class="qr-holder"></div>
     </div>
-    <h3 style="font-size:13.5px;color:var(--text-soft);margin:16px 0 8px;">تكليفاتي</h3>
+    <h3 class="sub-title">📋 تكليفاتي</h3>
     ${myAssignments.length===0 ? `<p class="muted">لا توجد تكليفات حاليًا.</p>` :
       myAssignments.map(a=>{
         const done = !!a.completions[u.id];
-        return `<div class="card px-3 py-2 mb-3" style="display:flex;justify-content:space-between;align-items:center;">
-          <div><b style="font-size:13.5px;">${escapeHtml(a.title)}</b><div class="muted">${escapeHtml(a.description||'')}</div></div>
+        return `<div class="card asg-card ${done?'done':''} mb-3">
+          <div class="asg-ic">${done?'✅':'📋'}</div>
+          <div class="asg-body"><b>${escapeHtml(a.title)}</b><div class="muted">${escapeHtml(a.description||'')}</div></div>
           <span class="badge rounded-pill ${done?'badge-ok':'badge-gold'}">${done? '✓ '+a.points+' نقطة' : a.points+' نقطة'}</span>
         </div>`;
       }).join('')
@@ -1458,19 +1468,20 @@ function renderMine(u){
     ${(()=>{
       const myExams = state.exams.filter(e=> (!e.classroomId || e.classroomId===u.classroomId) && (e.status==='open' || responseOf(e.id,u.id)));
       if(!myExams.length) return '';
-      return `<h3 style="font-size:13.5px;color:var(--text-soft);margin:16px 0 8px;">الامتحانات</h3>` + myExams.map(e=>{
+      return `<h3 class="sub-title">📝 الامتحانات</h3>` + myExams.map(e=>{
         const r = responseOf(e.id,u.id); const s = r ? scoreResponse(e,r) : null;
-        return `<div class="card px-3 py-2 mb-3 d-flex flex-row justify-content-between align-items-center gap-2">
-          <div><b style="font-size:13.5px;">📝 ${escapeHtml(e.title)}</b><div class="muted">${e.questions.length} سؤال</div></div>
+        return `<div class="card asg-card mb-3">
+          <div class="asg-ic">📝</div>
+          <div class="asg-body"><b>${escapeHtml(e.title)}</b><div class="muted">${e.questions.length} سؤال</div></div>
           ${r ? `<button class="btn btn-outline btn-sm" data-take-exam="${e.id}">${e.showScore && s.total ? '✓ '+s.got+'/'+s.total : '✓ تم التسليم'}</button>` : `<button class="btn btn-gold btn-sm" data-take-exam="${e.id}">ابدأ الامتحان</button>`}
         </div>`;}).join('');
     })()}
-    <h3 style="font-size:13.5px;color:var(--text-soft);margin:16px 0 8px;">سجل الحضور</h3>
+    <h3 class="sub-title">🗓️ سجل الحضور</h3>
     ${records.length===0 ? `<div class="empty"><div class="big">🗒️</div>لا يوجد سجل حضور بعد.</div>` :
       `<div class="card p-3 mb-3"><ul class="plain">${records.map(r=>`
-        <li style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);">
-          <span>${fmtDate(r.date)}</span>
-          <span class="d-flex" style="gap:6px;">
+        <li class="log-row">
+          <span class="chip">📅 ${fmtDate(r.date)}</span>
+          <span class="log-badges">
             <span class="badge rounded-pill ${r.quddas?'badge-ok':'badge-bad'}">قداس ${r.quddas?'✓':'✗'}</span>
             <span class="badge rounded-pill ${r.ijtimaa?'badge-ok':'badge-bad'}">اجتماع ${r.ijtimaa?'✓':'✗'}</span>
           </span>
@@ -1533,7 +1544,7 @@ function renderExamsAdmin(u){
   const list = examsVisibleTo(u);
   return `
   <div class="card p-3 mb-3">
-    <b style="font-size:14px;">إنشاء امتحان جديد</b>
+    ${cardHead('📝','إنشاء امتحان جديد')}
     <div class="mb-3 mt-2"><input class="form-control" type="text" id="exam_title" placeholder="عنوان الامتحان"></div>
     <div class="mb-3"><select class="form-select" id="exam_cls"><option value="">كل الفصول</option>${editable.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
     <button class="btn btn-gold" id="addExamBtn">إنشاء وإضافة الأسئلة</button>
@@ -1798,13 +1809,14 @@ function bindExamEvents(u){
 /* ---------------- MINISTRY (khadim/senior_admin: attendance + assignments + points) ---------------- */
 function renderMinistry(u){
   const sub = ui.ministrySub || 'attendance';
+  const mineCls = myClassrooms(u).map(c=>c.name);
   return `
-  <div class="screen">
-    <h2 class="section-title">الخدمة</h2>
+  <div class="screen tab-ministry">
+    ${heroHTML('ministry', '🏫', 'الخدمة', mineCls.length ? `فصلك: ${escapeHtml(mineCls.join('، '))}` : 'الحضور والتكليفات والنقاط')}
     <div class="segmented">
-      <button class="${sub==='attendance'?'active':''}" data-ministry="attendance">الحضور</button>
-      <button class="${sub==='assignments'?'active':''}" data-ministry="assignments">التكليفات</button>
-      <button class="${sub==='points'?'active':''}" data-ministry="points">النقاط</button>
+      <button class="${sub==='attendance'?'active':''}" data-ministry="attendance">✅ الحضور</button>
+      <button class="${sub==='assignments'?'active':''}" data-ministry="assignments">📋 التكليفات</button>
+      <button class="${sub==='points'?'active':''}" data-ministry="points">⭐ النقاط</button>
     </div>
     ${sub==='attendance' ? renderAttendanceAdmin(u) : ''}
     ${sub==='assignments' ? renderAssignments(u) : ''}
@@ -1824,8 +1836,8 @@ function renderAttendanceAdmin(u){
   return `
     <div class="segmented">${viewClassrooms.map(c=>`<button class="${ui.adminAttClassroom===c.id?'active':''}" data-cls="${c.id}">${escapeHtml(c.name)}${c.servantIds.includes(u.id)?' (فصلي)':''}</button>`).join('')}</div>
     ${!activeCls ? `<div class="empty"><div class="big">🏫</div>لا توجد فصول بعد.</div>` : `
-    <div class="card px-3 py-2 mb-3" style="display:flex;justify-content:space-between;align-items:center;">
-      <span class="muted">التاريخ: ${fmtDate(date)} (اليوم)</span>
+    <div class="card px-3 py-2 mb-3 date-strip">
+      <span class="ds-ic">📅</span><div class="ds-txt"><b>${fmtDate(date)}</b><div class="muted">اليوم · ${members.length} ${members.length===1?'عضو':'أعضاء'}</div></div>
       ${canEdit ? `<button class="btn btn-teal btn-sm" id="openScanBtn">📷 مسح للحضور</button>` : `<span class="badge rounded-pill badge-ink">عرض فقط</span>`}
     </div>
     <div class="card p-3 mb-3">
@@ -1836,12 +1848,12 @@ function renderAttendanceAdmin(u){
           return `<div class="member-row">
             <div class="avatar">${initials(m.name)}</div>
             <div class="m-name">${escapeHtml(m.name)}<small>${m.points||0} نقطة</small></div>
-            <div class="check ${q?'on':''}" ${canEdit?'':'disabled'} data-att="${m.id}" data-field="quddas" title="القداس">${q?'✓':''}</div>
-            <div class="check ${i?'on':''}" ${canEdit?'':'disabled'} data-att="${m.id}" data-field="ijtimaa" title="الاجتماع">${i?'✓':''}</div>
+            <div class="check ${q?'on':''}" ${canEdit?'':'disabled'} data-att="${m.id}" data-field="quddas" title="القداس">${q?'✓':'⛪'}</div>
+            <div class="check ${i?'on':''}" ${canEdit?'':'disabled'} data-att="${m.id}" data-field="ijtimaa" title="الاجتماع">${i?'✓':'🤝'}</div>
           </div>`;
         }).join('')}
     </div>
-    <div class="card px-3 py-2 mb-3 muted" style="text-align:center;">✓ يسار = القداس (+${state.settings.pointsQuddas} نقطة) &nbsp;&nbsp; ✓ يمين = الاجتماع (+${state.settings.pointsIjtimaa} نقطة)</div>
+    <div class="legend"><span class="chip">⛪ القداس +${state.settings.pointsQuddas}</span><span class="chip">🤝 الاجتماع +${state.settings.pointsIjtimaa}</span><span class="chip">اضغط الدائرة لتسجيل الحضور</span></div>
     `}`;
 }
 
@@ -1881,7 +1893,7 @@ function renderTasks(u){
   return `
     ${canCreate ? `
     <div class="card p-3 mb-3">
-      <b style="font-size:14px;">تكليف جديد</b>
+      ${cardHead('📋','تكليف جديد')}
       <div class="mb-3" style="margin-top:10px;"><input class="form-control" type="text" id="asg_title" placeholder="عنوان التكليف"></div>
       <div class="mb-3"><textarea class="form-control" id="asg_desc" placeholder="وصف مختصر (اختياري)"></textarea></div>
       <div class="d-flex gap-2 equal-cols">
@@ -1911,6 +1923,7 @@ function renderTasks(u){
           ${a.file ? `<div class="d-flex align-items-center gap-2" style="margin:8px 0;"><a href="${escapeHtml(a.file.url)}" target="_blank" rel="noopener" style="font-weight:700;color:var(--teal);word-break:break-all;">📎 ${escapeHtml(a.file.name)}</a><span class="muted">(${fileSizeLabel(a.file.size||0)})</span>${canCreate ? `<button class="btn-ghost" data-remove-file="${a.id}" style="color:var(--bad);">إزالة</button>` : ''}</div>` : ''}
           ${canCreate ? `<div style="margin:4px 0;"><label class="btn-ghost" for="attach_${a.id}" style="cursor:pointer;">${a.file ? '🔄 استبدال ملف PDF' : '📎 إرفاق ملف PDF'}</label><input type="file" id="attach_${a.id}" data-attach-input="${a.id}" accept="application/pdf,.pdf" hidden></div>` : ''}
           ${a.description ? `<p class="muted" style="margin:6px 0;">${escapeHtml(a.description)}</p>` : ''}
+          <div class="today-progress" style="margin:10px 0;"><span style="width:${members.length ? Math.round(doneCount/members.length*100) : 0}%"></span></div>
           <div class="d-flex gap-2 equal-cols" style="align-items:center;margin:8px 0 10px;">
             <span class="muted">قيمة النقاط:</span>
             ${canCreate ? `<input class="form-control" type="number" min="0" data-asg-points="${a.id}" value="${a.points}" style="width:70px;padding:6px 8px;border-radius:8px;border:1.5px solid var(--line);">` : `<b>${a.points}</b>`}
@@ -1929,16 +1942,19 @@ function renderPoints(u){
   const memberIds = new Set();
   scope.forEach(c=> membersOfClassroom(c.id).forEach(m=>memberIds.add(m.id)));
   const members = state.users.filter(m=>memberIds.has(m.id)).sort((a,b)=> (b.points||0)-(a.points||0));
+  const top = members.filter(m=>(m.points||0)>0).slice(0,3);
+  const podium = top.length ? `<div class="podium">${[1,0,2].map(k=>top[k]).filter(Boolean).map(m=>{ const rank = top.indexOf(m)+1; return `<div class="pod pod-${rank}"><div class="pod-medal">${['🥇','🥈','🥉'][rank-1]}</div><div class="avatar">${escapeHtml(initials(m.name))}</div><div class="pod-name">${escapeHtml(m.name.split(' ')[0])}</div><div class="pod-pts">${m.points||0}</div><div class="pod-step"></div></div>`; }).join('')}</div>` : '';
   return `
     <div class="card p-3 mb-3">
-      <b style="font-size:14px;">إعدادات نقاط الحضور</b>
+      ${cardHead('⚙️','إعدادات نقاط الحضور')}
       <div class="d-flex gap-2 equal-cols" style="margin-top:10px;">
         <div class="mb-3"><label class="form-label">نقاط حضور القداس</label><input class="form-control" type="number" id="pts_quddas" value="${state.settings.pointsQuddas}" min="0" ${canEditSettings?'':'disabled'}></div>
         <div class="mb-3"><label class="form-label">نقاط حضور الاجتماع</label><input class="form-control" type="number" id="pts_ijtimaa" value="${state.settings.pointsIjtimaa}" min="0" ${canEditSettings?'':'disabled'}></div>
       </div>
       ${canEditSettings ? `<button class="btn btn-teal" id="savePointsSettings">حفظ الإعدادات</button>` : `<p class="muted">مدير الكنيسة فقط يمكنه تعديل هذه القيم.</p>`}
     </div>
-    <h3 style="font-size:13.5px;color:var(--text-soft);margin:16px 0 8px;">نقاط الأعضاء</h3>
+    ${podium}
+    <h3 class="sub-title">⭐ نقاط الأعضاء</h3>
     ${members.length===0 ? `<p class="muted">لا يوجد أعضاء في نطاق فصولك بعد.</p>` :
       members.map(m=>`
       <div class="card px-3 py-2 mb-3" style="display:flex;justify-content:space-between;align-items:center;">
@@ -1958,7 +1974,7 @@ function renderChat(u){
   if(u.role==='makhdoum'){
     let myChat = [...state.chats].filter(c=>c.memberId===u.id).sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt))[0];
     if(!myChat || myChat.status==='closed'){
-      return `<div class="screen"><h2 class="section-title">تواصل مع الخدمة</h2>
+      return `<div class="screen tab-chat">${heroHTML('chat','💬','تواصل مع الخدمة','نحن هنا للمساعدة')}
         <div class="empty"><div class="big">💬</div>${myChat ? 'تم إغلاق محادثتك السابقة.' : 'ليس لديك محادثة حاليًا.'}<br>ابدأ محادثة جديدة مع أحد الخدام.</div>
         <button class="btn btn-gold" id="newChatBtn">بدء محادثة جديدة</button></div>`;
     }
@@ -1968,16 +1984,16 @@ function renderChat(u){
   const unclaimed = state.chats.filter(c=>c.status==='unclaimed');
   const mine = state.chats.filter(c=>c.claimedById===u.id && c.status==='claimed');
   return `
-  <div class="screen">
-    <h2 class="section-title">قائمة الدردشات</h2>
-    <h3 style="font-size:13.5px;color:var(--text-soft);margin:0 0 8px;">غير مُستلمة (${unclaimed.length})</h3>
+  <div class="screen tab-chat">
+    ${heroHTML('chat','💬','الدردشات', `${unclaimed.length} بانتظار الاستلام · ${mine.length} محادثاتي`)}
+    <h3 class="sub-title">🟡 غير مُستلمة <span class="chip">${unclaimed.length}</span></h3>
     ${unclaimed.length===0 ? `<p class="muted" style="margin-bottom:16px;">لا توجد محادثات بانتظار الاستلام.</p>` :
       unclaimed.map(c=>`<div class="chat-list-item" data-openchat="${c.id}">
         <div class="avatar">${initials(c.memberName)}</div>
         <div style="flex:1;min-width:0;"><b>${escapeHtml(c.memberName)}</b><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(c.messages[c.messages.length-1]?.text || '')}</div></div>
         <button class="btn btn-gold btn-sm" data-claim="${c.id}">استلام</button>
       </div>`).join('')}
-    <h3 style="font-size:13.5px;color:var(--text-soft);margin:18px 0 8px;">محادثاتي (${mine.length})</h3>
+    <h3 class="sub-title">💚 محادثاتي <span class="chip">${mine.length}</span></h3>
     ${mine.length===0 ? `<p class="muted">لا توجد محادثات مستلمة حاليًا.</p>` :
       mine.map(c=>`<div class="chat-list-item" data-openchat="${c.id}">
         <div class="avatar">${initials(c.memberName)}</div>
@@ -1992,13 +2008,13 @@ function renderChatThread(u, chat){
     : chat.status==='claimed' ? `<span class="badge rounded-pill badge-ok">${isMember ? 'يتحدث معك: '+escapeHtml(chat.claimedByName) : 'مستلمة بواسطتك'}</span>`
     : `<span class="badge rounded-pill badge-ink">تم إغلاق المحادثة</span>`;
   return `
-  <div class="screen">
-    <div class="d-flex align-items-center gap-2" style="margin-bottom:10px;">
-      <button class="btn-ghost" id="backToChatList">‹ رجوع</button>
-      <b style="flex:1;">${isMember ? 'محادثتي' : escapeHtml(chat.memberName)}</b>
+  <div class="screen tab-chat">
+    <div class="card thread-head mb-3">
+      <button class="round-btn" id="backToChatList" aria-label="رجوع">›</button>
+      <div class="avatar">${escapeHtml(initials(isMember ? (chat.claimedByName || 'خ') : chat.memberName))}</div>
+      <div class="th-txt"><b>${isMember ? 'محادثتي' : escapeHtml(chat.memberName)}</b><div>${statusBadge}</div></div>
       ${(!isMember && chat.status==='claimed' && chat.claimedById===u.id) ? `<button class="btn-ghost" id="closeChatBtn" style="color:var(--bad);">إنهاء</button>` : ''}
     </div>
-    <div class="card px-3 py-2 mb-3" style="margin-bottom:10px;">${statusBadge}</div>
     <div class="chat-thread">
       <div class="thread-msgs">${chat.messages.map(m=>{
         const cls = (isMember ? m.sender==='member' : m.sender==='admin') ? 'me' : 'them';
@@ -2113,8 +2129,8 @@ function renderAdmin(u){
     return x.stageId && stageOf(x.stageId) && stageOf(x.stageId).sectorId===u.sectorId;
   });
   return `
-  <div class="screen">
-    <h2 class="section-title">لوحة الإدارة${!isDirector ? ' — '+escapeHtml(sectorOf(u.sectorId) ? sectorOf(u.sectorId).name : 'قطاعك') : ''}</h2>
+  <div class="screen tab-admin">
+    ${heroHTML('admin', '🛡️', 'لوحة الإدارة', !isDirector ? escapeHtml(sectorOf(u.sectorId) ? sectorOf(u.sectorId).name : 'قطاعك') : 'إدارة الكنيسة', pendingUsers.length ? `<span class="hero-chip">⏳ ${pendingUsers.length}</span>` : '')}
     <div class="segmented">
       <button class="${sub==='pending'?'active':''}" data-adminsub="pending">طلبات الانتظار ${pendingUsers.length?('('+pendingUsers.length+')'):''}</button>
       <button class="${sub==='people'?'active':''}" data-adminsub="people">الخدام والفصول</button>
