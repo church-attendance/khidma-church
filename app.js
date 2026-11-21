@@ -3,7 +3,7 @@
    Client-only demo: persistence via localStorage on this device only.
    ======================================================================= */
 
-const APP_VERSION = 'v15 · redesigned tabs + new tab bar';
+const APP_VERSION = 'v15.2 · steadier refresh + chat fixes';
 const STORAGE_PREFIX = 'khidma_church_app_v3_';
 const CHURCH_CODE_KEY = 'khidma_church_code';
 
@@ -70,7 +70,14 @@ function mergeChat(b, l, r){
     if(!seen.has(k)){ seen.add(k); msgs.push(m); }
   });
   msgs.sort((x,y)=> new Date(x.time)-new Date(y.time));
-  const side = (b && sameJSON(noMsgs(l), noMsgs(b))) ? r : l;   // whoever changed status/claim wins
+  const rank = { unclaimed:0, claimed:1, closed:2 };
+  let side;
+  if(l.status !== r.status) side = (rank[l.status] >= rank[r.status]) ? l : r;                 // the furthest stage wins: closed > claimed > unclaimed
+  else if(l.status === 'claimed' && l.claimedById !== r.claimedById){                            // two servants claimed it at the same time:
+    const kl = (l.claimedAt || '9') + '|' + l.claimedById, kr = (r.claimedAt || '9') + '|' + r.claimedById;
+    side = kl <= kr ? l : r;                                                                    // the first one keeps it (every device decides the same way)
+  }
+  else side = (b && sameJSON(noMsgs(l), noMsgs(b))) ? r : l;   // otherwise whoever changed it wins
   return { ...side, messages: msgs };
 }
 function mergeById(base, local, remote, both){
@@ -119,7 +126,21 @@ async function flushPush(){
     } while(pushQueued);
   }catch(e){ console.warn('Supabase push failed (will retry):', e); }
   finally{ syncing = false; }
-  if(replaced) render();
+  if(replaced) softRefresh();
+}
+/* order-insensitive comparison (the database re-orders the keys of what it stores) */
+function deepEqual(a, b){
+  if(a === b) return true;
+  if(a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if(Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if(ka.length !== kb.length) return false;
+  return ka.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+/* two timestamps from the database / the app: equal even if one has microseconds, and safe where Date.parse cannot read one */
+function sameStamp(a, b){
+  const x = Date.parse(a), y = Date.parse(b);
+  return (isNaN(x) || isNaN(y)) ? String(a).slice(0,23) === String(b).slice(0,23) : x === y;
 }
 // Poll for changes made by other people/devices, and merge them in.
 async function pollRemoteState(){
@@ -129,9 +150,13 @@ async function pollRemoteState(){
   const row = await fetchRemoteState(churchCode);
   if(dirty || syncing) return;   // something changed locally while we were fetching
   if(!row || !row.data || !Array.isArray(row.data.users) || !row.data.users.length) return;
-  if(!lastSyncedAt || Date.parse(row.updated_at) !== Date.parse(lastSyncedAt)){
+  if(!lastSyncedAt || !sameStamp(row.updated_at, lastSyncedAt)){
+    if(deepEqual({ ...row.data, session:0 }, { ...state, session:0 })){      // new time stamp, same content: nothing to show, nothing to redraw
+      lastSyncedAt = row.updated_at; baseState = clone(state);
+      return;
+    }
     adoptRemote(row.data, row.updated_at);
-    render();
+    softRefresh();
   }
 }
 // Run once at startup: if this church's row already has data, adopt it (so every
@@ -534,10 +559,19 @@ function themeSwitcherHTML(){
 function bindThemeButtons(){ document.querySelectorAll('[data-theme-set]').forEach(b=>{ b.onclick = ()=> setTheme(b.dataset.themeSet); }); }
 applyTheme(currentTheme());
 
-function render(){ renderCore(); bindThemeButtons(); if(typeof ensureReminders==='function') ensureReminders(); if(typeof syncPush==='function') syncPush(); }
+let lastRenderAt = 0;
+const renderLog = [];       // the last redraws and who asked for them (shown by the hidden diagnostic pill)
+function logRender(){
+  const why = (new Error().stack || '').split('\n').slice(3,6).map(l=>{ const m = /^\s*(?:at\s+)?(?:async\s+)?([A-Za-z_$][\w$.]*)/.exec(l); return m ? m[1] : ''; }).filter(Boolean).join(' ← ');
+  renderLog.push({ t: Date.now(), why }); if(renderLog.length > 40) renderLog.shift();
+}
+function render(){ lastRenderAt = Date.now(); logRender(); renderCore(); bindThemeButtons(); if(typeof ensureReminders==='function') ensureReminders(); if(typeof syncPush==='function') syncPush(); }
+let lastThreadId = null, lastScreenKey = null;
 function renderCore(){
   checkEmergencyExpiry();
   const root = document.getElementById('root');
+  const box0 = document.querySelector('.thread-msgs');
+  const keep = box0 ? { top: box0.scrollTop, atBottom: box0.scrollHeight - box0.scrollTop - box0.clientHeight < 60, id: lastThreadId } : null;
   const chatEl = document.getElementById('chatInput');
   const typed = chatEl ? chatEl.value : null, hadFocus = chatEl && document.activeElement === chatEl;
   const ae = document.activeElement;
@@ -554,9 +588,21 @@ function renderCore(){
   if(u.status === 'rejected'){ root.className = 'auth-shell'; root.innerHTML = renderRejected(u); bindPendingEvents(); return; }
 
   root.className = 'app-shell'; root.innerHTML = renderApp(u);
+  const screenKey = [ui.activeTab, ui.ministrySub, ui.adminSub, ui.openChatId, ui.takingExam, ui.openPsalm, ui.lib && ui.lib.open].join('|');
+  if(root.querySelector){ const sc = root.querySelector('.screen'); if(sc && screenKey === lastScreenKey) sc.classList.add('still'); }
+  lastScreenKey = screenKey;
+  if(root.insertAdjacentHTML && localStorage.getItem('khidma_debug') === '1'){
+    const now = Date.now(), recent = renderLog.filter(r => now - r.t < 10000);
+    root.insertAdjacentHTML('beforeend', `<div class="debug-pill">↻ ${recent.length} / 10s · ${recent.slice(-3).map(r=>escapeHtml(r.why)).join(' | ')}</div>`);
+  }
   bindAppEvents(u);
   if(fkey){ const el = document.querySelector(`[data-fkey="${fkey}"]`); if(el){ el.focus(); try{ el.setSelectionRange(selS, selE); }catch(e){} } }
   if(typed){ const el = document.getElementById('chatInput'); if(el){ el.value = typed; if(hadFocus) el.focus(); } }
+  const box1 = document.querySelector('.thread-msgs');
+  if(box1){   // a chat just opened, or the reader was at the bottom -> show the newest message; otherwise stay where they were
+    box1.scrollTop = (!keep || keep.id !== ui.openChatId || keep.atBottom) ? box1.scrollHeight : keep.top;
+    lastThreadId = ui.openChatId;
+  } else lastThreadId = null;
   if(ui.scanning) startScanner();
 }
 
@@ -1969,6 +2015,53 @@ function renderPoints(u){
 }
 
 /* ---------------- CHAT ---------------- */
+/* ---- chat helpers ---- */
+function threadMessagesHTML(u, chat){
+  const isMember = u.role==='makhdoum';
+  return chat.messages.map(m=>{
+    const cls = (isMember ? m.sender==='member' : m.sender==='admin') ? 'me' : 'them';
+    return `<div class="bubble ${cls}">${escapeHtml(m.text)}<span class="t">${fmtTime(m.time)}${m.senderName?' · '+escapeHtml(m.senderName):''}</span></div>`;
+  }).join('') || `<div class="muted" style="text-align:center;margin:auto;">ابدأ المحادثة بكتابة رسالتك 👋</div>`;
+}
+const threadSig = chat => chat.messages.length + '|' + (chat.messages.length ? chat.messages[chat.messages.length-1].time : '') + '|' + chat.status + '|' + (chat.claimedById || '');
+/* Refresh the OPEN chat without rebuilding the whole screen: the keyboard stays open, the typed text stays, the scroll stays. */
+function updateThreadInPlace(){
+  const u = currentUser(), box = document.querySelector('.thread-msgs');
+  const chat = state.chats.find(c=>c.id===ui.openChatId);
+  if(!u || !box || !chat) return false;
+  const canReply = (u.role==='makhdoum' || chat.claimedById===u.id) && chat.status!=='closed';
+  if(!!document.getElementById('chatInput') !== canReply) return false;      // the layout changes (e.g. the chat was closed): needs a full redraw
+  const sig = threadSig(chat);
+  if(box.dataset.sig !== sig){
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    box.innerHTML = threadMessagesHTML(u, chat); box.dataset.sig = sig;
+    if(atBottom) box.scrollTop = box.scrollHeight;
+    const th = document.querySelector('.thread-head .th-txt'); if(th) th.innerHTML = threadHeadHTML(u, chat);
+  }
+  return true;
+}
+/* used by the timers and by the sync: never disturbs someone who is typing a chat message */
+let softTimer = null;
+function softRefresh(){
+  const inp = document.getElementById('chatInput');
+  if(inp && (document.activeElement === inp || inp.value) && updateThreadInPlace()) return;   // typing: update just the messages
+  if(Date.now() - lastRenderAt < 2000){                       // we just redrew: never redraw again within 2 seconds because of a timer/sync
+    if(!softTimer) softTimer = setTimeout(()=>{ softTimer = null; softRefresh(); }, 2100);
+    return;
+  }
+  render();
+}
+function threadStatusBadge(u, chat){
+  const isMember = u.role==='makhdoum';
+  return chat.status==='unclaimed' ? `<span class="badge rounded-pill badge-gold">بانتظار استلام أحد الخدام</span>`
+    : chat.status==='claimed' ? `<span class="badge rounded-pill badge-ok">${isMember ? 'يتحدث معك: '+escapeHtml(chat.claimedByName) : 'مستلمة بواسطتك'}</span>`
+    : `<span class="badge rounded-pill badge-ink">تم إغلاق المحادثة</span>`;
+}
+function threadHeadHTML(u, chat){
+  const isMember = u.role==='makhdoum';
+  return `<b>${isMember ? 'محادثتي' : escapeHtml(chat.memberName)}</b><div>${threadStatusBadge(u, chat)}</div>`;
+}
+
 function renderChat(u){
   if(ui.openChatId){ const chat = state.chats.find(c=>c.id===ui.openChatId); if(chat) return renderChatThread(u, chat); ui.openChatId = null; }
   if(u.role==='makhdoum'){
@@ -1990,37 +2083,31 @@ function renderChat(u){
     ${unclaimed.length===0 ? `<p class="muted" style="margin-bottom:16px;">لا توجد محادثات بانتظار الاستلام.</p>` :
       unclaimed.map(c=>`<div class="chat-list-item" data-openchat="${c.id}">
         <div class="avatar">${initials(c.memberName)}</div>
-        <div style="flex:1;min-width:0;"><b>${escapeHtml(c.memberName)}</b><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(c.messages[c.messages.length-1]?.text || '')}</div></div>
+        <div style="flex:1;min-width:0;"><b>${escapeHtml(c.memberName)}</b><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(c.messages[c.messages.length-1]?.text || 'محادثة جديدة — بدون رسائل بعد')}</div></div>
         <button class="btn btn-gold btn-sm" data-claim="${c.id}">استلام</button>
       </div>`).join('')}
     <h3 class="sub-title">💚 محادثاتي <span class="chip">${mine.length}</span></h3>
     ${mine.length===0 ? `<p class="muted">لا توجد محادثات مستلمة حاليًا.</p>` :
       mine.map(c=>`<div class="chat-list-item" data-openchat="${c.id}">
         <div class="avatar">${initials(c.memberName)}</div>
-        <div style="flex:1;min-width:0;"><b>${escapeHtml(c.memberName)}</b><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(c.messages[c.messages.length-1]?.text || '')}</div></div>
+        <div style="flex:1;min-width:0;"><b>${escapeHtml(c.memberName)}</b><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(c.messages[c.messages.length-1]?.text || 'محادثة جديدة — بدون رسائل بعد')}</div></div>
       </div>`).join('')}
   </div>`;
 }
 function renderChatThread(u, chat){
   const isMember = u.role==='makhdoum';
   const canReply = isMember || chat.claimedById===u.id;
-  const statusBadge = chat.status==='unclaimed' ? `<span class="badge rounded-pill badge-gold">بانتظار استلام أحد الخدام</span>`
-    : chat.status==='claimed' ? `<span class="badge rounded-pill badge-ok">${isMember ? 'يتحدث معك: '+escapeHtml(chat.claimedByName) : 'مستلمة بواسطتك'}</span>`
-    : `<span class="badge rounded-pill badge-ink">تم إغلاق المحادثة</span>`;
   return `
   <div class="screen tab-chat">
     <div class="card thread-head mb-3">
-      <button class="round-btn" id="backToChatList" aria-label="رجوع">›</button>
+      ${isMember ? '' : `<button class="round-btn" id="backToChatList" aria-label="رجوع">›</button>`}
       <div class="avatar">${escapeHtml(initials(isMember ? (chat.claimedByName || 'خ') : chat.memberName))}</div>
-      <div class="th-txt"><b>${isMember ? 'محادثتي' : escapeHtml(chat.memberName)}</b><div>${statusBadge}</div></div>
+      <div class="th-txt">${threadHeadHTML(u, chat)}</div>
       ${(!isMember && chat.status==='claimed' && chat.claimedById===u.id) ? `<button class="btn-ghost" id="closeChatBtn" style="color:var(--bad);">إنهاء</button>` : ''}
     </div>
     <div class="chat-thread">
-      <div class="thread-msgs">${chat.messages.map(m=>{
-        const cls = (isMember ? m.sender==='member' : m.sender==='admin') ? 'me' : 'them';
-        return `<div class="bubble ${cls}">${escapeHtml(m.text)}<span class="t">${fmtTime(m.time)}${m.senderName?' · '+escapeHtml(m.senderName):''}</span></div>`;
-      }).join('')}</div>
-      ${canReply && chat.status!=='closed' ? `<div class="thread-input"><input class="form-control" type="text" id="chatInput" placeholder="اكتب رسالتك..."><button class="btn btn-primary" id="sendChatBtn">إرسال</button></div>`
+      <div class="thread-msgs" data-sig="${escapeHtml(threadSig(chat))}">${threadMessagesHTML(u, chat)}</div>
+      ${canReply && chat.status!=='closed' ? `<div class="thread-input"><input class="form-control" type="text" id="chatInput" placeholder="اكتب رسالتك..." enterkeyhint="send" autocomplete="off"><button class="btn btn-primary" id="sendChatBtn">إرسال</button></div>`
         : chat.status==='closed' ? `<p class="muted" style="text-align:center;padding-top:8px;">هذه المحادثة مغلقة.</p>`
         : `<p class="muted" style="text-align:center;padding-top:8px;">بانتظار استلام أحد الخدام قبل أن تتمكن من الرد.</p>`}
     </div>
@@ -2632,19 +2719,33 @@ function bindAppEvents(u){
   // CHAT
   const newChatBtn = document.getElementById('newChatBtn');
   if(newChatBtn) newChatBtn.onclick = ()=>{ const chat = { id:uid('chat'), memberId:u.id, memberName:u.name, status:'unclaimed', claimedById:null, claimedByName:null, messages:[], createdAt: nowISO() }; state.chats.push(chat); ui.openChatId = chat.id; persist(); render(); };
-  document.querySelectorAll('[data-claim]').forEach(b=>{ b.onclick = ()=>{ const chat = state.chats.find(c=>c.id===b.dataset.claim); chat.status='claimed'; chat.claimedById=u.id; chat.claimedByName=u.name; log(u.name, `استلم محادثة مع ${chat.memberName}.`); ui.openChatId = chat.id; persist(); render(); }; });
+  document.querySelectorAll('[data-claim]').forEach(b=>{ b.onclick = (ev)=>{
+    if(ev && ev.stopPropagation) ev.stopPropagation();
+    const chat = state.chats.find(c=>c.id===b.dataset.claim);
+    if(!chat){ render(); return; }
+    if(chat.status!=='unclaimed'){ showToast('سبقك أحد الخدام باستلام هذه المحادثة.'); return; }
+    chat.status='claimed'; chat.claimedById=u.id; chat.claimedByName=u.name; chat.claimedAt=nowISO();
+    log(u.name, `استلم محادثة مع ${chat.memberName}.`); ui.openChatId = chat.id; persist(); render();
+  }; });
   document.querySelectorAll('[data-openchat]').forEach(b=>{ b.onclick = ()=>{ ui.openChatId = b.dataset.openchat; render(); }; });
   const backBtn = document.getElementById('backToChatList'); if(backBtn) backBtn.onclick = ()=>{ ui.openChatId=null; render(); };
   const closeChatBtn = document.getElementById('closeChatBtn');
   if(closeChatBtn) closeChatBtn.onclick = ()=>{ const chat = state.chats.find(c=>c.id===ui.openChatId); chat.status='closed'; log(u.name, `أنهى المحادثة مع ${chat.memberName}.`); ui.openChatId=null; persist(); render(); };
-  const sendBtn = document.getElementById('sendChatBtn');
-  if(sendBtn) sendBtn.onclick = ()=>{
-    const input = document.getElementById('chatInput'); const text = input.value.trim(); if(!text) return;
-    const chat = state.chats.find(c=>c.id===ui.openChatId); const isMember = u.role==='makhdoum';
+  const sendBtn = document.getElementById('sendChatBtn'), chatInput = document.getElementById('chatInput');
+  const doSend = ()=>{
+    const input = document.getElementById('chatInput'); if(!input) return;
+    const text = input.value.trim(); if(!text) return;
+    const chat = state.chats.find(c=>c.id===ui.openChatId); if(!chat || chat.status==='closed') return;
+    const isMember = u.role==='makhdoum';
     chat.messages.push({ sender: isMember?'member':'admin', senderName:u.name, senderId:u.id, text, time: nowISO() });
-    persist(); render();
-    setTimeout(()=>{ const el=document.querySelector('.thread-msgs'); if(el) el.scrollTop = el.scrollHeight; },0);
+    input.value = '';                                   // clear the box (it used to keep the sent text)
+    persist();
+    if(!updateThreadInPlace()) render();
+    const box = document.querySelector('.thread-msgs'); if(box) box.scrollTop = box.scrollHeight;
+    const again = document.getElementById('chatInput'); if(again) again.focus();   // keep the keyboard open for the next message
   };
+  if(sendBtn) sendBtn.onclick = doSend;
+  if(chatInput) chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); doSend(); } });
 
   // ADMIN
   document.querySelectorAll('[data-adminsub]').forEach(b=>{ b.onclick = ()=>{ ui.adminSub = b.dataset.adminsub; render(); }; });
@@ -2884,11 +2985,18 @@ function applyHashTab(){
   if(tabsFor(u.role).some(t=>t.id===h)){ ui.activeTab = h; try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){} render(); }
 }
 window.addEventListener('hashchange', applyHashTab);
+/* hidden diagnostic: tap the cross in the blue top bar 5 times (within 3 s) to show / hide a small redraw counter */
+let dbgTaps = [];
+document.addEventListener('click', (e)=>{
+  const t = e.target; if(!(t && t.closest && t.closest('.topbar > svg'))) return;
+  const n = Date.now(); dbgTaps = dbgTaps.filter(x => n - x < 3000); dbgTaps.push(n);
+  if(dbgTaps.length >= 5){ dbgTaps = []; try{ localStorage.setItem('khidma_debug', localStorage.getItem('khidma_debug') === '1' ? '0' : '1'); }catch(err){} render(); }
+});
 applyHashTab();
 // Pull the latest shared state from the database once at startup, then keep polling
 // periodically so changes made by other people/devices show up here too.
 initialSync();
-setInterval(()=>{ if(currentUser() && !ui.scanning) render(); }, 30000);
+setInterval(()=>{ if(currentUser() && !ui.scanning) softRefresh(); }, 30000);
 setInterval(()=>{ if(!ui.scanning) pollRemoteState(); }, 8000);
 
 /* ---------------- PWA: make the app installable to the home screen ---------------- */

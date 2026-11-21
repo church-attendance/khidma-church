@@ -151,6 +151,7 @@ input,textarea,select{font-family:inherit;}
 /* ---------- content ---------- */
 .content{flex:1;overflow-y:auto;padding:20px 16px 112px;}
 .screen{animation:fadein .18s ease;}
+.screen.still{animation:none;}
 @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 
 /* the glossy bubble before every section title is the one decorative signature of the app */
@@ -347,7 +348,7 @@ textarea.form-control{resize:vertical;min-height:80px;}
 /* ---------- chat: real speech bubbles ---------- */
 .chat-list-item{display:flex;align-items:center;gap:10px;padding:13px 14px;border:2.5px solid var(--line);border-radius:22px;margin-bottom:10px;cursor:pointer;background:var(--paper);box-shadow:0 3px 0 var(--line);}
 .chat-list-item:active{transform:translateY(3px);box-shadow:none;}
-.chat-thread{display:flex;flex-direction:column;height:calc(100vh - 280px);min-height:320px;}
+.chat-thread{display:flex;flex-direction:column;height:calc(100vh - 300px);height:calc(100dvh - 300px);min-height:320px;}
 .thread-msgs{flex:1;overflow-y:auto;padding:6px 2px;display:flex;flex-direction:column;gap:9px;}
 .bubble{max-width:82%;padding:10px 16px;border-radius:24px;font-size:15.5px;line-height:1.65;word-break:break-word;box-shadow:0 3px 0 rgba(0,0,0,.08);}
 .bubble.me{align-self:flex-start;background:linear-gradient(160deg,var(--bubble-me-a),var(--bubble-me-b));color:var(--bubble-me-text);border:2px solid var(--bubble-me-border);border-bottom-left-radius:6px;}
@@ -474,7 +475,7 @@ input[type="time"].form-control{text-align:center;}
   #root.app-shell > .tabbar .tab:hover{background:var(--tab-pill);}
   .confirm-overlay,.scan-overlay{max-width:none;left:0;right:0;}
   .app-toast{bottom:28px;}
-  .chat-thread{height:calc(100vh - 250px);}
+  .chat-thread{height:calc(100vh - 270px);height:calc(100dvh - 270px);}
   /* keep big action buttons a sensible size on wide cards */
   .screen > .btn:not(.btn-sm), .card > .btn:not(.btn-sm){max-width:420px;}
 }
@@ -650,3 +651,5 @@ input[type="time"].form-control{text-align:center;}
 
 /* ---------- SETTINGS ---------- */
 .tab-settings .hero-ic{font-size:30px;}
+
+.debug-pill{position:fixed;left:8px;top:calc(8px + env(safe-area-inset-top));z-index:300;background:rgba(0,0,0,.78);color:#fff;font:11px/1.5 monospace;padding:4px 10px;border-radius:12px;max-width:92%;direction:ltr;text-align:left;pointer-events:none;}
